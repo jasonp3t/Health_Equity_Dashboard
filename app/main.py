@@ -111,7 +111,6 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # ─── California County Data ──────────────────────────────────────────────────────
-# Major CA counties with approximate centroids and weights
 CA_COUNTIES = {
     'Los Angeles County':    (34.0522, -118.2437, 580),
     'San Diego County':      (32.8501, -116.9829, 280),
@@ -195,6 +194,14 @@ INCOME_COLORS = {
     '$75-100k':'#388E3C','>$100k':'#1565C0'
 }
 GENDER_COLORS = {'Male':'#1a9e8f','Female':'#f59e0b'}
+
+def hex_to_rgba(hex_color, alpha=0.12):
+    """Convert hex color string to rgba() string safely."""
+    hex_color = hex_color.lstrip('#')
+    r = int(hex_color[0:2], 16)
+    g = int(hex_color[2:4], 16)
+    b = int(hex_color[4:6], 16)
+    return f"rgba({r},{g},{b},{alpha})"
 
 def section(title):
     st.markdown(f'<div class="section-header">{title}</div>', unsafe_allow_html=True)
@@ -587,12 +594,11 @@ elif page == "⚖️ Intersectional Comparison":
 
 
 # ════════════════════════════════════════════════════════════════════════════════
-#  PAGE 5 — PREDICTIVE FORECASTING  (updated: all models, best auto-selected, 2030)
+#  PAGE 5 — PREDICTIVE FORECASTING
 # ════════════════════════════════════════════════════════════════════════════════
 elif page == "🤖 Predictive Forecasting":
     section("🤖 Predictive Forecasting — Auto-Selects Best Model & Forecasts to 2030")
 
-    # ── Train ALL models, pick best ───────────────────────────────────────────
     @st.cache_data
     def train_all_models(df):
         dfc = df.copy()
@@ -606,26 +612,25 @@ elif page == "🤖 Predictive Forecasting":
         X_tr, X_te, y_tr, y_te = train_test_split(X, y, test_size=.2, random_state=42)
 
         candidates = {
-            'Linear Regression':       LinearRegression(),
-            'Ridge Regression':        Ridge(alpha=1.0),
-            'Random Forest':           RandomForestRegressor(n_estimators=100, max_depth=6,
-                                                              random_state=42, n_jobs=-1),
-            'Gradient Boosting':       GradientBoostingRegressor(n_estimators=150, max_depth=4,
-                                                                   learning_rate=0.05,
-                                                                   subsample=0.8,
-                                                                   random_state=42),
+            'Linear Regression':  LinearRegression(),
+            'Ridge Regression':   Ridge(alpha=1.0),
+            'Random Forest':      RandomForestRegressor(n_estimators=100, max_depth=6,
+                                                        random_state=42, n_jobs=-1),
+            'Gradient Boosting':  GradientBoostingRegressor(n_estimators=150, max_depth=4,
+                                                             learning_rate=0.05,
+                                                             subsample=0.8,
+                                                             random_state=42),
         }
 
         results = {}
         for name, mdl in candidates.items():
             mdl.fit(X_tr, y_tr)
             preds = mdl.predict(X_te)
-            mae  = mean_absolute_error(y_te, preds)
-            r2   = r2_score(y_te, preds)
+            mae   = mean_absolute_error(y_te, preds)
+            r2    = r2_score(y_te, preds)
             results[name] = {'model': mdl, 'mae': mae, 'r2': r2,
                               'preds': preds, 'y_te': y_te}
 
-        # Best = lowest MAE
         best_name = min(results, key=lambda k: results[k]['mae'])
         best = results[best_name]
 
@@ -734,40 +739,38 @@ elif page == "🤖 Predictive Forecasting":
         hist['type'] = 'Historical'
         hist['race'] = race
 
-        # --- Build synthetic future feature rows ---
+        # Build synthetic future feature rows
         mean_age   = race_df.age.mean()
         mean_inc   = race_df.income.mean()
         mean_ins   = race_df.insurance_pct.mean()
-        # Use modal income_band
         modal_band = race_df.income_band.mode()[0]
 
-        race_enc  = le_r.transform([race])[0]
+        race_enc   = le_r.transform([race])[0]
         gender_enc_m = le_g.transform(['Male'])[0]
         income_enc = le_i.transform([str(modal_band)])[0]
 
         future_preds = []
         for yr in FUTURE_YEARS:
-            # Predict with small perturbation to estimate spread
             n_sim = 200
-            ages    = np.random.normal(mean_age, 5, n_sim).clip(0,110)
-            incomes = np.random.normal(mean_inc, 8000, n_sim).clip(10000,250000)
-            ins     = np.random.normal(mean_ins, 5, n_sim).clip(10,100)
+            ages    = np.random.normal(mean_age, 5, n_sim).clip(0, 110)
+            incomes = np.random.normal(mean_inc, 8000, n_sim).clip(10000, 250000)
+            ins     = np.random.normal(mean_ins, 5, n_sim).clip(10, 100)
             X_sim = pd.DataFrame({
-                'race_enc':    race_enc,
-                'gender_enc':  gender_enc_m,
-                'age':         ages,
-                'income':      incomes,
+                'race_enc':      race_enc,
+                'gender_enc':    gender_enc_m,
+                'age':           ages,
+                'income':        incomes,
                 'insurance_pct': ins,
                 'encounter_year': yr,
-                'income_enc':  income_enc
+                'income_enc':    income_enc
             })
             sim_preds = best_model.predict(X_sim[feats])
             future_preds.append({
-                'year': yr,
+                'year':      yr,
                 'mean_cost': sim_preds.mean(),
                 'std_cost':  sim_preds.std(),
-                'type': 'Forecast',
-                'race': race
+                'type':      'Forecast',
+                'race':      race
             })
 
         forecast_rows.append(hist)
@@ -804,21 +807,21 @@ elif page == "🤖 Predictive Forecasting":
             showlegend=True
         ))
 
-        # Confidence band
+        # Confidence band — FIX: proper hex→rgba conversion
         upper = future_r.mean_cost + future_r.std_cost
         lower = (future_r.mean_cost - future_r.std_cost).clip(lower=0)
         fig_fc.add_trace(go.Scatter(
             x=pd.concat([future_r.year, future_r.year[::-1]]),
             y=pd.concat([upper, lower[::-1]]),
             fill='toself',
-            fillcolor=clr.replace('#','rgba(').replace(')',',0.12)') if '#' in clr else clr,
+            fillcolor=hex_to_rgba(clr, 0.12),
             line=dict(color='rgba(255,255,255,0)'),
             showlegend=False,
             legendgroup=race,
             hoverinfo='skip'
         ))
 
-    # Vertical line at 2024 (start of forecast)
+    # Vertical line at start of forecast
     fig_fc.add_vline(x=2023.5, line_dash='dash', line_color='gray',
                       annotation_text='Forecast →', annotation_position='top right')
 
@@ -843,7 +846,7 @@ elif page == "🤖 Predictive Forecasting":
     tbl_2030['±Std Dev'] = tbl_2030['±Std Dev'].map('${:,.2f}'.format)
     st.dataframe(tbl_2030, use_container_width=True, hide_index=True)
 
-    # ── Historical + forecast for a user-selected outcome ─────────────────────
+    # ── Multi-Graph Explorer ──────────────────────────────────────────────────
     section("🔬 Multi-Graph Explorer — Choose Axes × Toggle Outcome")
     st.info("Select X and Y axes below. Each cell shows the chosen outcome metric across years "
             "(solid = historical 2015–2023, dashed = forecast 2024–2030).")
@@ -860,9 +863,9 @@ elif page == "🤖 Predictive Forecasting":
                                }[x])
 
     def axis_vals(col):
-        if col == 'income_band':  return ['<$25k','$25-50k','$50-75k','$75-100k','>$100k']
-        if col == 'race':         return sorted(df.race.unique())
-        if col == 'gender':       return ['Male','Female']
+        if col == 'income_band':    return ['<$25k','$25-50k','$50-75k','$75-100k','>$100k']
+        if col == 'race':           return sorted(df.race.unique())
+        if col == 'gender':         return ['Male','Female']
         if col == 'encounter_year': return sorted(df.encounter_year.unique())
         return sorted(df[col].unique())
 
@@ -877,10 +880,10 @@ elif page == "🤖 Predictive Forecasting":
 
     n_cols = min(len(x_vals), 4)
 
-    if x_axis == 'race':         col_enc = RACE_COLORS
-    elif x_axis == 'income_band': col_enc = INCOME_COLORS
-    elif x_axis == 'gender':      col_enc = GENDER_COLORS
-    else:                          col_enc = None
+    if x_axis == 'race':           col_enc = RACE_COLORS
+    elif x_axis == 'income_band':  col_enc = INCOME_COLORS
+    elif x_axis == 'gender':       col_enc = GENDER_COLORS
+    else:                           col_enc = None
 
     for y_val in y_vals:
         section(f"Row: {y_axis} = {y_val}")
@@ -894,7 +897,6 @@ elif page == "🤖 Predictive Forecasting":
             grp_hist = cell_df.groupby('encounter_year')[outcome].mean().reset_index()
             clr = col_enc.get(str(x_val), '#1a9e8f') if col_enc else '#1a9e8f'
 
-            # Build future forecast for this cell using best model (only for claim cost)
             fig_cell = go.Figure()
             fig_cell.add_trace(go.Scatter(
                 x=grp_hist['encounter_year'], y=grp_hist[outcome],
@@ -905,7 +907,6 @@ elif page == "🤖 Predictive Forecasting":
             ))
 
             if outcome == 'total_claim_cost':
-                # Use polynomial extrapolation for other outcomes in the grid
                 from numpy.polynomial.polynomial import polyfit, polyval
                 xs = grp_hist['encounter_year'].values.astype(float)
                 ys = grp_hist[outcome].values
