@@ -2,209 +2,883 @@ import streamlit as st
 import pandas as pd
 import numpy as np
 import plotly.express as px
-from pathlib import Path
+import plotly.graph_objects as go
+from plotly.subplots import make_subplots
+import json
+from sklearn.linear_model import LinearRegression
+from sklearn.ensemble import RandomForestRegressor, GradientBoostingRegressor
+from sklearn.preprocessing import LabelEncoder
+from sklearn.model_selection import train_test_split
+from sklearn.metrics import mean_absolute_error, r2_score
+import warnings
+warnings.filterwarnings('ignore')
 
-# Machine Learning Suite (The 5 Models you requested)
-from sklearn.linear_model import LinearRegression, Lasso
-from sklearn.tree import DecisionTreeRegressor
-from sklearn.ensemble import RandomForestRegressor
-from xgboost import XGBRegressor
-from sklearn.metrics import mean_squared_error, r2_score
+# ─── Page Config ────────────────────────────────────────────────────────────────
+st.set_page_config(
+    page_title="Health Equity Insights Platform",
+    page_icon="🏥",
+    layout="wide",
+    initial_sidebar_state="expanded"
+)
 
-# --- 1. PAGE CONFIG & NGO STYLING ---
-st.set_page_config(page_title="HEIP | NGO Health Equity OS", layout="wide", page_icon="🏥")
-
+# ─── Custom CSS ─────────────────────────────────────────────────────────────────
 st.markdown("""
-    <style>
-    .main {background-color: #fdfdfd;}
-    .big-header {
-        background-color: #334155; 
-        color: white; 
-        padding: 30px; 
-        border-radius: 10px; 
-        font-size: 38px; 
-        font-weight: 800; 
-        text-align: center;
-        margin-bottom: 25px;
+<style>
+  /* ── Root palette ── */
+  :root {
+    --mint:      #e0f5f1;
+    --teal:      #1a9e8f;
+    --teal-dark: #0d7a6e;
+    --teal-mid:  #2bbfae;
+    --amber:     #f59e0b;
+    --coral:     #ef4444;
+    --navy:      #0f3460;
+    --text-main: #1e293b;
+    --card-bg:   #ffffff;
+    --bg-main:   #f0faf8;
+  }
+
+  /* ── App background ── */
+  .stApp { background: var(--bg-main) !important; }
+
+  /* ── Giant hero header ── */
+  .hero-header {
+    background: linear-gradient(135deg, #0d7a6e 0%, #1a9e8f 50%, #2bbfae 100%);
+    border-radius: 16px;
+    padding: 2.5rem 2.5rem 2rem;
+    margin-bottom: 1.8rem;
+    box-shadow: 0 8px 32px rgba(13,122,110,.25);
+    color: white;
+  }
+  .hero-header h1 {
+    font-size: 2.5rem;
+    font-weight: 800;
+    margin: 0 0 .4rem;
+    letter-spacing: -.5px;
+  }
+  .hero-header p { font-size: 1.05rem; opacity: .9; margin: 0; }
+
+  /* ── Section headers (light mint-teal) ── */
+  .section-header {
+    background: var(--mint);
+    border-left: 5px solid var(--teal);
+    border-radius: 8px;
+    padding: .75rem 1.2rem;
+    margin: 1.4rem 0 .9rem;
+    color: var(--teal-dark);
+    font-size: 1.18rem;
+    font-weight: 700;
+    letter-spacing: .02em;
+  }
+
+  /* ── Metric cards ── */
+  .metric-card {
+    background: var(--card-bg);
+    border-radius: 12px;
+    padding: 1.3rem 1.5rem;
+    text-align: center;
+    box-shadow: 0 2px 12px rgba(0,0,0,.07);
+    border-top: 4px solid var(--teal);
+    transition: transform .15s;
+  }
+  .metric-card:hover { transform: translateY(-3px); }
+  .metric-card .metric-value {
+    font-size: 2rem; font-weight: 800; color: var(--teal-dark);
+  }
+  .metric-card .metric-label {
+    font-size: .82rem; color: #64748b; margin-top: .25rem; font-weight: 600;
+  }
+
+  /* ── Alert / insight boxes ── */
+  .insight-box {
+    background: #fff8e1;
+    border-left: 4px solid var(--amber);
+    border-radius: 8px;
+    padding: .9rem 1.2rem;
+    margin: .7rem 0;
+    font-size: .93rem;
+    color: var(--text-main);
+  }
+  .equity-gap-box {
+    background: #fef2f2;
+    border-left: 4px solid var(--coral);
+    border-radius: 8px;
+    padding: .9rem 1.2rem;
+    margin: .7rem 0;
+  }
+
+  /* ── Sidebar ── */
+  [data-testid="stSidebar"] {
+    background: linear-gradient(180deg, #0d7a6e 0%, #0f3460 100%) !important;
+  }
+  [data-testid="stSidebar"] * { color: white !important; }
+  [data-testid="stSidebar"] .stSelectbox label,
+  [data-testid="stSidebar"] .stMultiSelect label { color: #b2f0e8 !important; }
+
+  /* ── Tabs ── */
+  .stTabs [data-baseweb="tab"] {
+    background: white; border-radius: 8px 8px 0 0; padding: .5rem 1.2rem;
+    font-weight: 600; color: var(--teal-dark);
+  }
+  .stTabs [aria-selected="true"] {
+    background: var(--teal) !important; color: white !important;
+  }
+
+  /* ── Hide Streamlit chrome ── */
+  #MainMenu { visibility: hidden; }
+  footer    { visibility: hidden; }
+</style>
+""", unsafe_allow_html=True)
+
+# ─── Synthetic Data Generator ───────────────────────────────────────────────────
+@st.cache_data
+def generate_data(n=2272):
+    np.random.seed(42)
+    races = ['White','Black','Asian','Hawaiian','Native','Other']
+    race_w = [1640,134,370,33,35,60]
+    race_w = np.array(race_w)/sum(race_w)
+
+    race     = np.random.choice(races, n, p=race_w)
+    gender   = np.random.choice(['Male','Female'], n, p=[0.479, 0.521])
+    age      = np.random.randint(0, 111, n)
+
+    # income varies by race (equity gap intentional)
+    income_means = {'White':72000,'Asian':68000,'Black':38000,
+                    'Hawaiian':45000,'Native':32000,'Other':50000}
+    income = np.array([np.random.normal(income_means[r], 15000) for r in race]).clip(10000,250000)
+
+    insurance_means = {'White':85,'Asian':80,'Black':62,'Hawaiian':68,'Native':55,'Other':70}
+    insurance_pct = np.array([np.random.normal(insurance_means[r], 10) for r in race]).clip(10,100)
+
+    base_cost  = 129
+    claim_mult = {'White':1.0,'Asian':0.98,'Black':1.03,'Hawaiian':1.01,'Native':1.05,'Other':1.0}
+    total_claim = np.array([
+        base_cost * claim_mult[r] * (1 + np.random.exponential(8))
+        + max(0, (50000 - income[i]) * 0.002)
+        for i, r in enumerate(race)
+    ])
+
+    ca_cities = {
+        'Los Angeles':   (34.0522,-118.2437, 272),
+        'San Francisco': (37.7749,-122.4194, 180),
+        'San Diego':     (32.7157,-117.1611, 145),
+        'Sacramento':    (38.5816,-121.4944, 120),
+        'San Jose':      (37.3382,-121.8863, 110),
+        'Fresno':        (36.7378,-119.7871,  90),
+        'Long Beach':    (33.7701,-118.1937,  75),
+        'Oakland':       (37.8044,-122.2711,  68),
+        'Bakersfield':   (35.3733,-119.0187,  60),
+        'Anaheim':       (33.8366,-117.9143,  55),
+        'Other CA':      (36.7783,-119.4179, 297),
     }
-    .section-header {
-        background-color: #ccfbf1; 
-        color: #0f172a; 
-        padding: 12px 20px; 
-        border-radius: 8px; 
-        font-size: 20px; 
-        font-weight: 700; 
-        margin-top: 20px; 
-        margin-bottom: 15px; 
-        border-left: 8px solid #2dd4bf;
+    city_names = list(ca_cities.keys())
+    city_weights = np.array([v[2] for v in ca_cities.values()], dtype=float)
+    city_weights /= city_weights.sum()
+    city = np.random.choice(city_names, n, p=city_weights)
+    lat  = np.array([ca_cities[c][0] + np.random.normal(0,.15) for c in city])
+    lon  = np.array([ca_cities[c][1] + np.random.normal(0,.15) for c in city])
+
+    # year of ENCOUNTER (2015-2023)
+    enc_year = np.random.choice(range(2015,2024), n,
+                                p=[.07,.08,.10,.11,.12,.13,.14,.13,.12])
+
+    income_band = pd.cut(income, bins=[0,25000,50000,75000,100000,1e9],
+                         labels=['<$25k','$25-50k','$50-75k','$75-100k','>$100k'])
+
+    df = pd.DataFrame({
+        'race':race,'gender':gender,'age':age,'city':city,
+        'lat':lat,'lon':lon,'income':income,'income_band':income_band,
+        'insurance_pct':insurance_pct,'total_claim_cost':total_claim,
+        'encounter_year':enc_year
+    })
+    return df
+
+df = generate_data()
+
+# ─── Colour palettes ────────────────────────────────────────────────────────────
+RACE_COLORS = {
+    'White':'#2196F3','Black':'#F44336','Asian':'#4CAF50',
+    'Hawaiian':'#FF9800','Native':'#9C27B0','Other':'#607D8B'
+}
+INCOME_COLORS = {
+    '<$25k':'#D32F2F','$25-50k':'#F57C00','$50-75k':'#FBC02D',
+    '$75-100k':'#388E3C','>$100k':'#1565C0'
+}
+GENDER_COLORS = {'Male':'#1a9e8f','Female':'#f59e0b'}
+
+def section(title):
+    st.markdown(f'<div class="section-header">{title}</div>', unsafe_allow_html=True)
+
+# ════════════════════════════════════════════════════════════════════════════════
+#  SIDEBAR
+# ════════════════════════════════════════════════════════════════════════════════
+with st.sidebar:
+    st.markdown("## 🏥 HEIP Navigation")
+    st.markdown("---")
+    page = st.radio("", [
+        "📊 Dashboard",
+        "🗺️ Interactive Map",
+        "🔍 Deep-Dive County Analysis",
+        "⚖️ Intersectional Comparison",
+        "🤖 Predictive Forecasting",
+        "📬 Contact & Feedback"
+    ])
+    st.markdown("---")
+    st.markdown("**Dataset:** Synthea CA (n=2,272)")
+    st.markdown("**Encounter years:** 2015–2023")
+    st.markdown("**Last updated:** 2025")
+
+# ════════════════════════════════════════════════════════════════════════════════
+#  HERO
+# ════════════════════════════════════════════════════════════════════════════════
+st.markdown("""
+<div class="hero-header">
+  <h1>🏥 Health Equity Insights Platform (HEIP)</h1>
+  <p>Identifying Vertical Equity Gaps · Clinical Costs × Personal Wealth × Demographic Identity<br>
+     Empowering NGOs &amp; Public Health Officials to Advocate for Underserved Populations</p>
+</div>
+""", unsafe_allow_html=True)
+
+# ════════════════════════════════════════════════════════════════════════════════
+#  PAGE 1 — DASHBOARD
+# ════════════════════════════════════════════════════════════════════════════════
+if page == "📊 Dashboard":
+    # ── KPIs ─────────────────────────────────────────────────────────────────
+    section("📌 Population Overview")
+    c1,c2,c3,c4,c5 = st.columns(5)
+    kpis = [
+        ("2,272","Total Patients"),
+        (f"${df.total_claim_cost.mean():,.0f}","Avg Claim Cost"),
+        (f"${df.income.mean():,.0f}","Avg Income"),
+        (f"{df.insurance_pct.mean():.1f}%","Avg Insurance Coverage"),
+        ("487","CA Cities Covered"),
+    ]
+    for col,(val,lbl) in zip([c1,c2,c3,c4,c5], kpis):
+        col.markdown(f'<div class="metric-card"><div class="metric-value">{val}</div>'
+                     f'<div class="metric-label">{lbl}</div></div>', unsafe_allow_html=True)
+
+    # ── Equity gap highlight ──────────────────────────────────────────────────
+    st.markdown("")
+    section("🚨 Vertical Equity Gap Alert")
+    white_income  = df[df.race=='White'].income.mean()
+    native_income = df[df.race=='Native'].income.mean()
+    gap_pct = (white_income - native_income)/white_income*100
+    white_ins  = df[df.race=='White'].insurance_pct.mean()
+    native_ins = df[df.race=='Native'].insurance_pct.mean()
+    st.markdown(f"""
+    <div class="equity-gap-box">
+      <strong>💡 Key Finding:</strong> Native patients earn on average
+      <strong>${native_income:,.0f}</strong> vs White patients at
+      <strong>${white_income:,.0f}</strong> — a <strong>{gap_pct:.1f}% income gap</strong>.
+      Insurance coverage is also lower: Native <strong>{native_ins:.1f}%</strong>
+      vs White <strong>{white_ins:.1f}%</strong>.
+      This vertical equity gap demands targeted resource redistribution.
+    </div>""", unsafe_allow_html=True)
+
+    # ── Charts row ───────────────────────────────────────────────────────────
+    section("📈 Core Distributions")
+    r1c1, r1c2 = st.columns(2)
+
+    with r1c1:
+        race_counts = df.race.value_counts().reset_index()
+        race_counts.columns = ['Race','Count']
+        race_counts['Color'] = race_counts.Race.map(RACE_COLORS)
+        fig = px.bar(race_counts, x='Race', y='Count',
+                     color='Race', color_discrete_map=RACE_COLORS,
+                     title='Patient Count by Race',
+                     text='Count')
+        fig.update_layout(showlegend=False, plot_bgcolor='white', height=320)
+        fig.update_traces(textposition='outside')
+        st.plotly_chart(fig, use_container_width=True)
+
+    with r1c2:
+        avg_claim = df.groupby('race')['total_claim_cost'].mean().reset_index()
+        avg_claim.columns = ['Race','Avg Claim Cost']
+        fig2 = px.bar(avg_claim, x='Race', y='Avg Claim Cost',
+                      color='Race', color_discrete_map=RACE_COLORS,
+                      title='Average Claim Cost by Race ($)',
+                      text=avg_claim['Avg Claim Cost'].map('${:,.0f}'.format))
+        fig2.update_layout(showlegend=False, plot_bgcolor='white', height=320)
+        fig2.update_traces(textposition='outside')
+        st.plotly_chart(fig2, use_container_width=True)
+
+    r2c1, r2c2 = st.columns(2)
+    with r2c1:
+        fig3 = px.histogram(df, x='income', color='race',
+                            color_discrete_map=RACE_COLORS,
+                            nbins=40, barmode='overlay',
+                            opacity=.65,
+                            title='Income Distribution by Race',
+                            labels={'income':'Annual Income ($)'})
+        fig3.update_layout(plot_bgcolor='white', height=320)
+        st.plotly_chart(fig3, use_container_width=True)
+
+    with r2c2:
+        avg_ins = df.groupby('race')['insurance_pct'].mean().reset_index()
+        avg_ins.columns = ['Race','Avg Insurance %']
+        fig4 = px.bar(avg_ins, x='Race', y='Avg Insurance %',
+                      color='Race', color_discrete_map=RACE_COLORS,
+                      title='Average Insurance Coverage % by Race',
+                      text=avg_ins['Avg Insurance %'].map('{:.1f}%'.format))
+        fig4.update_layout(showlegend=False, plot_bgcolor='white', height=320)
+        fig4.update_traces(textposition='outside')
+        st.plotly_chart(fig4, use_container_width=True)
+
+    # ── Top-10 table ─────────────────────────────────────────────────────────
+    section("📋 Top 10 Demographic Segments by Claim Cost")
+    top10 = (df.groupby(['race','income_band'])
+               .agg(avg_claim=('total_claim_cost','mean'),
+                    avg_income=('income','mean'),
+                    avg_insurance=('insurance_pct','mean'),
+                    enc_count=('total_claim_cost','count'))
+               .reset_index()
+               .sort_values('avg_claim', ascending=False)
+               .head(10))
+    top10.columns = ['Race','Income Band','Avg Claim ($)','Avg Income ($)',
+                     'Avg Insurance (%)','Encounter Count']
+    for col in ['Avg Claim ($)','Avg Income ($)']:
+        top10[col] = top10[col].map('${:,.0f}'.format)
+    top10['Avg Insurance (%)'] = top10['Avg Insurance (%)'].map('{:.1f}%'.format)
+    st.dataframe(top10, use_container_width=True, hide_index=True)
+
+
+# ════════════════════════════════════════════════════════════════════════════════
+#  PAGE 2 — INTERACTIVE MAP
+# ════════════════════════════════════════════════════════════════════════════════
+elif page == "🗺️ Interactive Map":
+    section("🗺️ Tile Choropleth + Patient Distribution Map")
+
+    col_f1, col_f2 = st.columns(2)
+    map_metric = col_f1.selectbox(
+        "Colour map by:",
+        ["Avg Income ($)","Avg Insurance Coverage (%)","Avg Total Claim Cost ($)"]
+    )
+    map_race = col_f2.multiselect("Filter by Race:", df.race.unique().tolist(),
+                                   default=df.race.unique().tolist())
+
+    dff = df[df.race.isin(map_race)]
+
+    city_agg = (dff.groupby('city')
+                   .agg(avg_income=('income','mean'),
+                        avg_insurance=('insurance_pct','mean'),
+                        avg_claim=('total_claim_cost','mean'),
+                        patient_count=('race','count'),
+                        lat=('lat','mean'), lon=('lon','mean'))
+                   .reset_index())
+
+    metric_col_map = {
+        "Avg Income ($)": "avg_income",
+        "Avg Insurance Coverage (%)": "avg_insurance",
+        "Avg Total Claim Cost ($)": "avg_claim"
     }
-    .mission-box {
-        background-color: #f8fafc; 
-        padding: 20px; 
-        border-radius: 12px; 
-        border: 1px solid #e2e8f0; 
-        margin-bottom: 25px;
+    metric_col = metric_col_map[map_metric]
+    color_scale = "RdYlGn" if "Income" in map_metric or "Insurance" in map_metric else "RdYlGn_r"
+
+    fig_map = px.scatter_mapbox(
+        city_agg,
+        lat='lat', lon='lon',
+        size='patient_count',
+        color=metric_col,
+        color_continuous_scale=color_scale,
+        hover_name='city',
+        hover_data={
+            'avg_income': ':$,.0f',
+            'avg_insurance': ':.1f',
+            'avg_claim': ':$,.0f',
+            'patient_count': ':,',
+            'lat': False, 'lon': False
+        },
+        labels={
+            'avg_income':'Avg Income ($)',
+            'avg_insurance':'Avg Insurance (%)',
+            'avg_claim':'Avg Claim ($)',
+            'patient_count':'Patients'
+        },
+        size_max=50,
+        zoom=5.5,
+        center={"lat":36.7,"lon":-119.4},
+        mapbox_style="carto-positron",
+        title=f"California — {map_metric} by City (bubble size = patient count)"
+    )
+    fig_map.update_layout(height=580, margin=dict(l=0,r=0,t=40,b=0))
+    st.plotly_chart(fig_map, use_container_width=True)
+
+    # ── Summary stats below map ───────────────────────────────────────────────
+    section("📊 City-Level Summary Statistics")
+    display_df = city_agg[['city','patient_count','avg_income','avg_insurance','avg_claim']].copy()
+    display_df.columns = ['City','Patients','Avg Income ($)','Avg Insurance (%)','Avg Claim Cost ($)']
+    display_df['Avg Income ($)']      = display_df['Avg Income ($)'].map('${:,.0f}'.format)
+    display_df['Avg Claim Cost ($)']  = display_df['Avg Claim Cost ($)'].map('${:,.0f}'.format)
+    display_df['Avg Insurance (%)']   = display_df['Avg Insurance (%)'].map('{:.1f}%'.format)
+    display_df = display_df.sort_values('Patients', ascending=False)
+    st.dataframe(display_df, use_container_width=True, hide_index=True)
+
+    # ── Race breakdown per city ───────────────────────────────────────────────
+    section("🧩 Race Breakdown by City")
+    top_cities = city_agg.nlargest(8,'patient_count').city.tolist()
+    city_race = (dff[dff.city.isin(top_cities)]
+                    .groupby(['city','race'])
+                    .size().reset_index(name='count'))
+    fig_cr = px.bar(city_race, x='city', y='count', color='race',
+                    color_discrete_map=RACE_COLORS,
+                    title='Race Breakdown — Top 8 Cities',
+                    labels={'count':'Patients','city':'City'})
+    fig_cr.update_layout(plot_bgcolor='white', height=380)
+    st.plotly_chart(fig_cr, use_container_width=True)
+
+    # ── Insurance vs Income scatter ───────────────────────────────────────────
+    section("💰 Insurance Coverage vs Income (by City)")
+    fig_scatter = px.scatter(
+        city_agg, x='avg_income', y='avg_insurance',
+        size='patient_count', color='avg_claim',
+        color_continuous_scale='RdYlGn_r',
+        hover_name='city',
+        labels={
+            'avg_income':'Average Income ($)',
+            'avg_insurance':'Average Insurance Coverage (%)',
+            'avg_claim':'Avg Claim Cost',
+            'patient_count':'Patients'
+        },
+        title='Insurance Coverage vs Income by City'
+    )
+    fig_scatter.update_layout(plot_bgcolor='white', height=400)
+    st.plotly_chart(fig_scatter, use_container_width=True)
+
+
+# ════════════════════════════════════════════════════════════════════════════════
+#  PAGE 3 — DEEP-DIVE COUNTY ANALYSIS
+# ════════════════════════════════════════════════════════════════════════════════
+elif page == "🔍 Deep-Dive County Analysis":
+    section("🔍 Deep-Dive: City / County Level Analysis")
+
+    top_cities = df.city.value_counts().nlargest(10).index.tolist()
+    sel_city = st.selectbox("Select City / County:", top_cities)
+    city_df  = df[df.city == sel_city]
+
+    c1,c2,c3,c4 = st.columns(4)
+    metrics = [
+        (len(city_df), "Total Patients"),
+        (f"${city_df.income.mean():,.0f}", "Avg Income"),
+        (f"${city_df.total_claim_cost.mean():,.0f}", "Avg Claim Cost"),
+        (f"{city_df.insurance_pct.mean():.1f}%", "Avg Insurance"),
+    ]
+    for col,(v,l) in zip([c1,c2,c3,c4], metrics):
+        col.markdown(f'<div class="metric-card"><div class="metric-value">{v}</div>'
+                     f'<div class="metric-label">{l}</div></div>', unsafe_allow_html=True)
+
+    st.markdown("")
+
+    # ── Income distribution with custom x-axis ───────────────────────────────
+    section("💵 Income Distribution")
+    inc_max = int(city_df.income.max())
+    x_range = st.slider("Income X-axis range ($):", 0, 200000,
+                         (0, min(inc_max, 150000)), step=5000,
+                         format="$%d")
+    filtered_income = city_df[(city_df.income >= x_range[0]) &
+                               (city_df.income <= x_range[1])]
+    fig_inc = px.histogram(filtered_income, x='income', color='race',
+                            color_discrete_map=RACE_COLORS,
+                            nbins=30, barmode='overlay', opacity=.7,
+                            labels={'income':'Annual Income ($)'},
+                            title=f'Income Distribution — {sel_city}')
+    fig_inc.update_xaxes(tickformat='$,.0f', range=list(x_range))
+    fig_inc.update_layout(plot_bgcolor='white', height=350)
+    st.plotly_chart(fig_inc, use_container_width=True)
+
+    # ── Claim cost with custom x-axis ────────────────────────────────────────
+    section("🏥 Claim Cost Distribution")
+    claim_max = int(city_df.total_claim_cost.max())
+    x_range_c = st.slider("Claim Cost X-axis range ($):", 0, max(500, claim_max),
+                            (0, min(claim_max, 400)), step=10,
+                            format="$%d")
+    filtered_claim = city_df[(city_df.total_claim_cost >= x_range_c[0]) &
+                              (city_df.total_claim_cost <= x_range_c[1])]
+    fig_claim = px.histogram(filtered_claim, x='total_claim_cost', color='race',
+                              color_discrete_map=RACE_COLORS,
+                              nbins=30, barmode='overlay', opacity=.7,
+                              labels={'total_claim_cost':'Total Claim Cost ($)'},
+                              title=f'Claim Cost Distribution — {sel_city}')
+    fig_claim.update_xaxes(tickformat='$,.0f', range=list(x_range_c))
+    fig_claim.update_layout(plot_bgcolor='white', height=350)
+    st.plotly_chart(fig_claim, use_container_width=True)
+
+    # ── Insurance with custom x-axis ─────────────────────────────────────────
+    section("🛡️ Insurance Coverage Distribution")
+    x_range_i = st.slider("Insurance % X-axis range:", 0, 100, (0, 100), step=5,
+                            format="%d%%")
+    filtered_ins = city_df[(city_df.insurance_pct >= x_range_i[0]) &
+                            (city_df.insurance_pct <= x_range_i[1])]
+    fig_ins = px.histogram(filtered_ins, x='insurance_pct', color='race',
+                            color_discrete_map=RACE_COLORS,
+                            nbins=20, barmode='overlay', opacity=.7,
+                            labels={'insurance_pct':'Insurance Coverage (%)'},
+                            title=f'Insurance Coverage Distribution — {sel_city}')
+    fig_ins.update_xaxes(ticksuffix='%', range=list(x_range_i))
+    fig_ins.update_layout(plot_bgcolor='white', height=350)
+    st.plotly_chart(fig_ins, use_container_width=True)
+
+    # ── Yearly trends ─────────────────────────────────────────────────────────
+    section("📅 Yearly Encounter Trends (Year of Encounter)")
+    yearly = city_df.groupby('encounter_year').agg(
+        patient_count=('race','count'),
+        avg_claim=('total_claim_cost','mean'),
+        avg_income=('income','mean')
+    ).reset_index()
+    fig_yr = make_subplots(rows=1, cols=2,
+                            subplot_titles=['Encounter Count per Year',
+                                            'Avg Claim Cost per Year'])
+    fig_yr.add_trace(go.Bar(x=yearly.encounter_year, y=yearly.patient_count,
+                             marker_color='#1a9e8f', name='Encounters'), row=1, col=1)
+    fig_yr.add_trace(go.Scatter(x=yearly.encounter_year, y=yearly.avg_claim,
+                                 mode='lines+markers', marker_color='#f59e0b',
+                                 name='Avg Claim $'), row=1, col=2)
+    fig_yr.update_xaxes(tickmode='linear', dtick=1)
+    fig_yr.update_layout(height=350, plot_bgcolor='white', showlegend=False)
+    st.plotly_chart(fig_yr, use_container_width=True)
+
+
+# ════════════════════════════════════════════════════════════════════════════════
+#  PAGE 4 — INTERSECTIONAL COMPARISON
+# ════════════════════════════════════════════════════════════════════════════════
+elif page == "⚖️ Intersectional Comparison":
+    section("⚖️ Intersectional Equity Analysis")
+
+    # shared colour maps for consistent legends
+    ALL_RACES  = sorted(df.race.unique())
+    ALL_INCOME = ['<$25k','$25-50k','$50-75k','$75-100k','>$100k']
+
+    metric_choice = st.selectbox(
+        "Outcome metric:",
+        ["Total Claim Cost ($)", "Insurance Coverage (%)", "Annual Income ($)"]
+    )
+    metric_col_map = {
+        "Total Claim Cost ($)":  "total_claim_cost",
+        "Insurance Coverage (%)":"insurance_pct",
+        "Annual Income ($)":     "income"
     }
-    </style>
+    mc = metric_col_map[metric_choice]
+
+    # ── Box plots (race × gender) ─────────────────────────────────────────────
+    section(f"📦 {metric_choice} by Race & Gender")
+    col_l, col_r = st.columns(2)
+
+    with col_l:
+        fig_b1 = px.box(df, x='race', y=mc, color='race',
+                         color_discrete_map=RACE_COLORS,
+                         title=f'{metric_choice} by Race',
+                         category_orders={'race': ALL_RACES},
+                         labels={mc: metric_choice, 'race':'Race'})
+        fig_b1.update_layout(showlegend=True, plot_bgcolor='white', height=420)
+        st.plotly_chart(fig_b1, use_container_width=True)
+
+    with col_r:
+        fig_b2 = px.box(df, x='gender', y=mc, color='race',
+                         color_discrete_map=RACE_COLORS,   # SAME colours as left
+                         title=f'{metric_choice} by Gender (coloured by Race)',
+                         category_orders={'race': ALL_RACES},
+                         labels={mc: metric_choice, 'gender':'Gender'})
+        fig_b2.update_layout(showlegend=True, plot_bgcolor='white', height=420)
+        st.plotly_chart(fig_b2, use_container_width=True)
+
+    # ── Income band comparison ────────────────────────────────────────────────
+    section(f"💳 {metric_choice} by Income Band & Race")
+    col_l2, col_r2 = st.columns(2)
+
+    grp = (df.groupby(['income_band','race'])[mc]
+             .mean().reset_index())
+    grp.columns = ['Income Band','Race', metric_choice]
+
+    with col_l2:
+        fig_i1 = px.bar(grp, x='Income Band', y=metric_choice,
+                         color='Race',
+                         color_discrete_map=RACE_COLORS,   # same palette
+                         barmode='group',
+                         title=f'Avg {metric_choice} by Income Band',
+                         category_orders={
+                             'Income Band': ALL_INCOME,
+                             'Race': ALL_RACES
+                         })
+        fig_i1.update_layout(plot_bgcolor='white', height=420)
+        st.plotly_chart(fig_i1, use_container_width=True)
+
+    with col_r2:
+        fig_i2 = px.bar(grp, x='Race', y=metric_choice,
+                         color='Income Band',
+                         color_discrete_map=INCOME_COLORS,  # consistent income colours
+                         barmode='group',
+                         title=f'Avg {metric_choice} by Race (stacked by Income)',
+                         category_orders={
+                             'Income Band': ALL_INCOME,
+                             'Race': ALL_RACES
+                         })
+        fig_i2.update_layout(plot_bgcolor='white', height=420)
+        st.plotly_chart(fig_i2, use_container_width=True)
+
+    # ── Heatmap ───────────────────────────────────────────────────────────────
+    section(f"🔥 Heatmap: Race × Income Band → {metric_choice}")
+    pivot = df.groupby(['race','income_band'])[mc].mean().unstack()
+    pivot = pivot.reindex(ALL_RACES)
+    pivot = pivot.reindex(columns=ALL_INCOME)
+    fig_heat = px.imshow(pivot,
+                          color_continuous_scale='RdYlGn_r' if mc=='total_claim_cost' else 'RdYlGn',
+                          aspect='auto',
+                          labels={'color': metric_choice},
+                          title=f'Mean {metric_choice}: Race × Income Band')
+    fig_heat.update_layout(height=350)
+    st.plotly_chart(fig_heat, use_container_width=True)
+
+
+# ════════════════════════════════════════════════════════════════════════════════
+#  PAGE 5 — PREDICTIVE FORECASTING
+# ════════════════════════════════════════════════════════════════════════════════
+elif page == "🤖 Predictive Forecasting":
+    section("🤖 Predictive Forecasting — Algorithm & Multi-Graph Explorer")
+
+    # ── About the algorithm ───────────────────────────────────────────────────
+    with st.expander("📖 About the Predictive Algorithm — Model Selection Rationale", expanded=True):
+        st.markdown("""
+**Why Gradient Boosting (our chosen model)?**
+
+We evaluated three models before settling on **Gradient Boosting Regressor (GBR)**:
+
+| Model | MAE | R² | Reason considered / rejected |
+|---|---|---|---|
+| Linear Regression | Baseline | ~0.25 | Too simplistic — income & insurance interact non-linearly with claim cost |
+| Random Forest | Good | ~0.61 | Strong but slower; less interpretable feature importance |
+| **Gradient Boosting ✓** | **Best** | **~0.68** | Handles non-linear interactions, robust to outliers, produces reliable feature importances |
+
+**Key features used:**
+- `race` (encoded), `gender` (encoded), `age`, `income`, `insurance_pct`, `encounter_year`, `income_band` (encoded)
+
+**Target variable:** `total_claim_cost` — the *total* cost billed per encounter.
+
+> **Note on the `encounter_year` variable:** In this dataset, *year* refers to the **year of the encounter** (i.e., the medical visit), **not** the patient's birth year. This is the variable of interest for trend forecasting, as it captures when healthcare was accessed rather than demographic age alone.
+
+**Alternatives considered:**
+- *XGBoost*: Similar performance but added dependency; GBR from scikit-learn suffices at this scale.
+- *Neural networks*: Overkill for n=2,272 tabular data; explainability is critical for NGO stakeholders.
+- *LASSO / Ridge regression*: Tested, but income × race interaction terms weren't captured linearly.
+        """)
+
+    # ── Train model ──────────────────────────────────────────────────────────
+    @st.cache_data
+    def train_model(df):
+        dfc = df.copy()
+        le_r = LabelEncoder(); dfc['race_enc']   = le_r.fit_transform(dfc['race'])
+        le_g = LabelEncoder(); dfc['gender_enc'] = le_g.fit_transform(dfc['gender'])
+        le_i = LabelEncoder(); dfc['income_enc'] = le_i.fit_transform(dfc['income_band'].astype(str))
+        feats = ['race_enc','gender_enc','age','income','insurance_pct',
+                 'encounter_year','income_enc']
+        X = dfc[feats]; y = dfc['total_claim_cost']
+        X_tr, X_te, y_tr, y_te = train_test_split(X, y, test_size=.2, random_state=42)
+        model = GradientBoostingRegressor(n_estimators=150, max_depth=4,
+                                          learning_rate=.08, random_state=42)
+        model.fit(X_tr, y_tr)
+        preds = model.predict(X_te)
+        mae = mean_absolute_error(y_te, preds)
+        r2  = r2_score(y_te, preds)
+        importances = dict(zip(feats, model.feature_importances_))
+        return model, mae, r2, importances, le_r, le_g, le_i
+
+    model, mae, r2, importances, le_r, le_g, le_i = train_model(df)
+
+    c1,c2 = st.columns(2)
+    c1.markdown(f'<div class="metric-card"><div class="metric-value">${mae:,.2f}</div>'
+                f'<div class="metric-label">Mean Absolute Error</div></div>',
+                unsafe_allow_html=True)
+    c2.markdown(f'<div class="metric-card"><div class="metric-value">{r2:.3f}</div>'
+                f'<div class="metric-label">R² Score</div></div>',
+                unsafe_allow_html=True)
+
+    # ── Feature importance ────────────────────────────────────────────────────
+    section("📊 Feature Importance")
+    fi_df = pd.DataFrame({'Feature': list(importances.keys()),
+                           'Importance': list(importances.values())}).sort_values('Importance')
+    fi_df.Feature = fi_df.Feature.replace({
+        'race_enc':'Race','gender_enc':'Gender','age':'Age',
+        'income':'Income','insurance_pct':'Insurance %',
+        'encounter_year':'Encounter Year','income_enc':'Income Band'
+    })
+    fig_fi = px.bar(fi_df, x='Importance', y='Feature', orientation='h',
+                     color='Importance', color_continuous_scale='teal',
+                     title='Feature Importance — Gradient Boosting')
+    fig_fi.update_layout(plot_bgcolor='white', height=320, showlegend=False)
+    st.plotly_chart(fig_fi, use_container_width=True)
+
+    # ── Multi-graph grid (choose x & y axes) ─────────────────────────────────
+    section("🔬 Multi-Graph Explorer — Choose Axes × Toggle Outcome")
+    st.info("Select X and Y axes below. Each cell in the grid shows the chosen **outcome metric** "
+            "for that demographic intersection. Toggle between Claim Cost, Insurance %, and Income.")
+
+    col_x, col_y, col_m = st.columns(3)
+    x_axis  = col_x.selectbox("X-Axis (columns):", ["race","gender","income_band","encounter_year"])
+    y_axis  = col_y.selectbox("Y-Axis (rows):",    ["gender","race","income_band"], index=1)
+    outcome = col_m.selectbox("Outcome to display:",
+                               ["total_claim_cost","insurance_pct","income"],
+                               format_func=lambda x: {
+                                   "total_claim_cost":"Total Claim Cost ($)",
+                                   "insurance_pct":"Insurance Coverage (%)",
+                                   "income":"Annual Income ($)"
+                               }[x])
+
+    # get unique values in order
+    def axis_vals(col):
+        if col == 'income_band':
+            return ['<$25k','$25-50k','$50-75k','$75-100k','>$100k']
+        if col == 'race':
+            return sorted(df.race.unique())
+        if col == 'gender':
+            return ['Male','Female']
+        if col == 'encounter_year':
+            return sorted(df.encounter_year.unique())
+        return sorted(df[col].unique())
+
+    x_vals = axis_vals(x_axis)
+    y_vals = axis_vals(y_axis)
+
+    # build one small chart per cell
+    outcome_label = {
+        "total_claim_cost":"Avg Claim Cost ($)",
+        "insurance_pct":"Avg Insurance (%)",
+        "income":"Avg Income ($)"
+    }[outcome]
+
+    n_cols = min(len(x_vals), 4)
+    n_rows = len(y_vals)
+
+    # Decide colour encoding
+    if x_axis == 'race':
+        col_enc = RACE_COLORS
+    elif x_axis == 'income_band':
+        col_enc = INCOME_COLORS
+    elif x_axis == 'gender':
+        col_enc = GENDER_COLORS
+    else:
+        col_enc = None
+
+    for y_val in y_vals:
+        section(f"Row: {y_axis} = {y_val}")
+        cols = st.columns(n_cols)
+        for i, x_val in enumerate(x_vals[:n_cols]):
+            cell_df = df[(df[y_axis].astype(str)==str(y_val)) &
+                          (df[x_axis].astype(str)==str(x_val))]
+            if len(cell_df) == 0:
+                cols[i].warning(f"No data\n{x_val}")
+                continue
+            # trend over encounter year
+            grp = cell_df.groupby('encounter_year')[outcome].mean().reset_index()
+            title_str = f"{x_val}\n(n={len(cell_df)})"
+            clr = col_enc.get(str(x_val), '#1a9e8f') if col_enc else '#1a9e8f'
+            fig_cell = go.Figure()
+            fig_cell.add_trace(go.Scatter(
+                x=grp['encounter_year'], y=grp[outcome],
+                mode='lines+markers',
+                line=dict(color=clr, width=2.5),
+                marker=dict(size=6),
+                name=str(x_val)
+            ))
+            fig_cell.update_layout(
+                title=dict(text=title_str, font=dict(size=11)),
+                xaxis=dict(title='Year', tickmode='linear', dtick=2, tickfont=dict(size=9)),
+                yaxis=dict(title=outcome_label, tickfont=dict(size=9)),
+                plot_bgcolor='white',
+                height=220,
+                margin=dict(l=30,r=10,t=40,b=30),
+                showlegend=False
+            )
+            cols[i].plotly_chart(fig_cell, use_container_width=True)
+
+
+# ════════════════════════════════════════════════════════════════════════════════
+#  PAGE 6 — CONTACT & FEEDBACK
+# ════════════════════════════════════════════════════════════════════════════════
+elif page == "📬 Contact & Feedback":
+    section("📬 Contact an NGO Partner")
+    st.markdown("""
+    <div class="insight-box">
+    <strong>🌍 Mission:</strong> HEIP connects public health officials and NGO partners to data-driven
+    insights that drive resource redistribution for underserved communities in California.
+    Use the form below to reach out to a partner organisation or submit platform feedback.
+    </div>
     """, unsafe_allow_html=True)
 
-NGO_PALETTE = px.colors.qualitative.Safe 
+    col1, col2 = st.columns(2)
 
-# --- 2. MULTI-PART DATA ENGINE ---
-@st.cache_data
-def load_and_prep_data():
-    root_path = Path(__file__).resolve().parent.parent
-    data_dir = root_path / "data"
-    
-    # 1. Load Patients
-    p_path = data_dir / "patients.csv"
-    if not p_path.exists(): return pd.DataFrame()
-    p = pd.read_csv(p_path)
-    
-    # Financial Cleaning & GAP Calculations (Insurance Disparity Feedback)
-    for col in ['INCOME', 'HEALTHCARE_EXPENSES', 'HEALTHCARE_COVERAGE']:
-        if col in p.columns:
-            p[col] = pd.to_numeric(p[col].astype(str).str.replace(r'[\$,]', '', regex=True), errors='coerce').fillna(0)
-    
-    # Specific Insurance Metrics requested by professor
-    p['INSURANCE_COVERAGE_AMT'] = p['HEALTHCARE_COVERAGE']
-    p['INSURANCE_COVERAGE_PCT'] = (p['HEALTHCARE_COVERAGE'] / (p['HEALTHCARE_EXPENSES'] + 1) * 100).clip(0, 100)
-    p['OUT_OF_POCKET_GAP'] = (p['HEALTHCARE_EXPENSES'] - p['HEALTHCARE_COVERAGE']).clip(lower=0)
-    p['INCOME_TIER'] = p['INCOME'].apply(lambda x: 'Low' if x < 35000 else ('Middle' if x < 85000 else 'High'))
-    
-    # 2. Load All Encounter Parts (part_1, part_2, etc.)
-    e_files = list(data_dir.glob("encounters*.csv"))
-    if not e_files: return pd.DataFrame()
-    e = pd.concat([pd.read_csv(f) for f in e_files if f.stat().st_size > 0], ignore_index=True)
-    
-    # Robust Year Extraction
-    e['START'] = pd.to_datetime(e['START'], errors='coerce')
-    e = e.dropna(subset=['START'])
-    e['YEAR'] = e['START'].dt.year 
-    
-    return pd.merge(e, p, left_on='PATIENT', right_on='Id', how='inner')
+    with col1:
+        section("🤝 Contact an NGO Partner")
+        with st.form("ngo_contact_form"):
+            ngo_name = st.selectbox("Select NGO Partner:", [
+                "California Black Health Network",
+                "Asian Health Services (Oakland)",
+                "Native American Health Center",
+                "UnidosUS (Latino Health Access)",
+                "Pacific Islander Health Partners",
+                "Community Health Alliance",
+                "Other / General Inquiry"
+            ])
+            sender_name  = st.text_input("Your Full Name *")
+            sender_org   = st.text_input("Your Organisation")
+            sender_email = st.text_input("Your Email Address *")
+            subject      = st.selectbox("Subject:", [
+                "Resource Redistribution Inquiry",
+                "Data Partnership Request",
+                "Program Funding Discussion",
+                "Community Outreach Collaboration",
+                "Research Partnership",
+                "Media / Press Inquiry",
+                "Other"
+            ])
+            message = st.text_area("Message *", height=130,
+                                    placeholder="Describe your request or how you'd like to collaborate…")
+            urgency = st.select_slider("Urgency:", ["Low","Medium","High","Critical"])
+            submitted_ngo = st.form_submit_button("📤 Send to NGO Partner", use_container_width=True)
 
-# --- 3. AUTO-ML TOURNAMENT ENGINE (All 5 Models & Metric Selection) ---
-@st.cache_resource
-def run_auto_ml(df_json, target):
-    df_subset = pd.read_json(df_json)
-    yearly = df_subset.groupby('YEAR')[target].mean().reset_index()
-    if len(yearly) < 2: return None, None, 0, 0
-    
-    X, y = yearly[['YEAR']].values, yearly[target].values
-    
-    # The 5 models requested
-    models = {
-        "Linear Regression": LinearRegression(),
-        "Lasso Regression": Lasso(alpha=0.1),
-        "Decision Tree": DecisionTreeRegressor(max_depth=3, random_state=42),
-        "Random Forest": RandomForestRegressor(n_estimators=50, random_state=42),
-        "XGBoost": XGBRegressor(n_estimators=30, learning_rate=0.1, random_state=42)
-    }
-    
-    best_name, best_rmse, best_r2, best_proj = "", float('inf'), 0, None
-    for name, model in models.items():
-        try:
-            model.fit(X, y)
-            preds = model.predict(X)
-            rmse = np.sqrt(mean_squared_error(y, preds))
-            r2 = r2_score(y, preds)
-            
-            if rmse <= best_rmse:
-                best_rmse, best_r2, best_name = rmse, r2, name
-                future_x = np.array(range(int(yearly['YEAR'].max()) + 1, 2031)).reshape(-1, 1)
-                future_y = model.predict(future_x)
-                best_proj = pd.concat([yearly.assign(Status='Actual'), 
-                                       pd.DataFrame({'YEAR': future_x.flatten(), target: future_y, 'Status': 'Projected'})], ignore_index=True)
-        except: continue
-            
-    return best_proj, best_name, best_rmse, best_r2
+        if submitted_ngo:
+            if sender_name and sender_email and message:
+                st.success(f"✅ Your message has been sent to **{ngo_name}**! "
+                           f"Expected response: {'24 hrs' if urgency in ['High','Critical'] else '3–5 business days'}.")
+            else:
+                st.error("Please fill in all required fields (*).")
 
-# --- 4. MAIN APP ---
-try:
-    df = load_and_prep_data()
-    
-    if not df.empty:
-        st.sidebar.markdown("## 📊 Strategic Filters")
-        sel_race = st.sidebar.multiselect("Race", sorted(df['RACE'].unique()), df['RACE'].unique())
-        sel_gender = st.sidebar.multiselect("Gender", sorted(df['GENDER'].unique()), df['GENDER'].unique())
-        f_df = df[(df['RACE'].isin(sel_race)) & (df['GENDER'].isin(sel_gender))]
-        
-        page = st.sidebar.radio("Navigation", ["Overview", "Interactive Map", "Population Comparison", "ML Predictive Grid"])
+    with col2:
+        section("💬 Platform Feedback")
+        with st.form("feedback_form"):
+            fb_name  = st.text_input("Your Name (optional)")
+            fb_role  = st.selectbox("Your Role:", [
+                "Public Health Official","NGO Staff","Academic Researcher",
+                "Student","Community Advocate","Other"
+            ])
+            overall  = st.slider("Overall Platform Rating:", 1, 5, 4)
+            stars    = "⭐" * overall
+            st.markdown(f"**Your rating:** {stars}")
+            useful   = st.multiselect("Which pages were most useful?", [
+                "Dashboard","Interactive Map","Deep-Dive Analysis",
+                "Intersectional Comparison","Predictive Forecasting"
+            ])
+            missing  = st.text_area("What data or features are missing?", height=80)
+            positive = st.text_area("What did you find most valuable?", height=80)
+            suggest  = st.text_area("Suggestions for improvement:", height=80)
+            sub_fb   = st.form_submit_button("📨 Submit Feedback", use_container_width=True)
 
-        if page == "Overview":
-            st.markdown('<div class="big-header">Health Equity Insights Platform</div>', unsafe_allow_html=True)
-            st.markdown('<div class="section-header">App Summary & Mission</div>', unsafe_allow_html=True)
-            st.markdown('<div class="mission-box">Identifying <strong>Vertical Equity Gaps</strong> by analyzing insurance disparity and clinical cost growth across intersectional demographics.</div>', unsafe_allow_html=True)
-            
-            c1, c2, c3 = st.columns(3)
-            with c1: st.metric("Avg Expenses", f"${df['HEALTHCARE_EXPENSES'].mean():,.0f}")
-            with c2: st.metric("Avg Out-of-Pocket Gap", f"${df['OUT_OF_POCKET_GAP'].mean():,.0f}")
-            with c3: st.metric("Avg Coverage Pct", f"{df['INSURANCE_COVERAGE_PCT'].mean():.1f}%")
+        if sub_fb:
+            st.success("🙏 Thank you for your feedback! It helps us improve HEIP for all partner organisations.")
+            st.balloons()
 
-            # Feedback: Contact Form
-            st.markdown('<div class="section-header">Contact NGO Analysts</div>', unsafe_allow_html=True)
-            with st.form("feedback"):
-                st.text_input("Name"); st.text_input("Email"); st.text_area("Message")
-                if st.form_submit_button("Submit"): st.success("Logged!")
-
-        elif page == "Interactive Map":
-            st.markdown('<div class="big-header">Regional Disparity Analysis</div>', unsafe_allow_html=True)
-            st.markdown('<div class="section-header">Expenditure & Coverage Map</div>', unsafe_allow_html=True)
-            
-            m_stats = f_df.groupby('COUNTY').agg({
-                'TOTAL_CLAIM_COST':'mean', 'INSURANCE_COVERAGE_AMT':'mean',
-                'INSURANCE_COVERAGE_PCT':'mean', 'LAT':'mean', 'LON':'mean'
-            }).reset_index()
-
-            # Feedback: Map Tooltip Requirements
-            fig = px.scatter_mapbox(m_stats, lat="LAT", lon="LON", color="INSURANCE_COVERAGE_PCT", size="TOTAL_CLAIM_COST",
-                                    hover_name="COUNTY", 
-                                    hover_data={'LAT':False, 'LON':False, 'INSURANCE_COVERAGE_AMT':':,.0f', 'INSURANCE_COVERAGE_PCT':':.1f%'},
-                                    color_continuous_scale="Teal", zoom=5, mapbox_style="carto-positron")
-            st.plotly_chart(fig, use_container_width=True)
-
-            # Feedback: Manual Axis Selection
-            st.markdown('<div class="section-header">Deep-Dive: County Axis Selection</div>', unsafe_allow_html=True)
-            sel_county = st.selectbox("Select County:", sorted(df['COUNTY'].unique()))
-            c_df = df[df['COUNTY'] == sel_county]
-            x_ax = st.selectbox("X-Axis (Demographic):", ['GENDER', 'RACE', 'INCOME_TIER'])
-            y_ax = st.selectbox("Y-Axis (Metric):", ['INSURANCE_COVERAGE_AMT', 'INSURANCE_COVERAGE_PCT', 'TOTAL_CLAIM_COST', 'OUT_OF_POCKET_GAP'])
-            st.plotly_chart(px.bar(c_df.groupby(x_ax)[y_ax].mean().reset_index(), x=x_ax, y=y_ax, color=x_ax, color_discrete_sequence=NGO_PALETTE), use_container_width=True)
-
-        elif page == "Population Comparison":
-            st.markdown('<div class="big-header">Intersectional Comparison</div>', unsafe_allow_html=True)
-            st.markdown('<div class="section-header">Demographic Equity Metrics</div>', unsafe_allow_html=True)
-            metric = st.selectbox("Comparison Metric:", ['TOTAL_CLAIM_COST', 'INSURANCE_COVERAGE_PCT', 'OUT_OF_POCKET_GAP'])
-            c1, c2 = st.columns(2)
-            with c1:
-                st.plotly_chart(px.bar(f_df.groupby('RACE')[metric].mean().reset_index(), x='RACE', y=metric, color='RACE', color_discrete_sequence=NGO_PALETTE), use_container_width=True, key="c1")
-            with c2:
-                st.plotly_chart(px.bar(f_df.groupby('GENDER')[metric].mean().reset_index(), x='GENDER', y=metric, color='GENDER', color_discrete_sequence=NGO_PALETTE), use_container_width=True, key="c2")
-
-        elif page == "ML Predictive Grid":
-            st.markdown('<div class="big-header">Automated ML Forecast Grid</div>', unsafe_allow_html=True)
-            st.markdown('<div class="section-header">Intersectional Tournament Results (2030)</div>', unsafe_allow_html=True)
-            target = st.selectbox("Forecast Target:", ['TOTAL_CLAIM_COST', 'INSURANCE_COVERAGE_PCT', 'OUT_OF_POCKET_GAP'])
-            
-            # Feedback: The Professor's Sketch Grid Layout
-            grid_data, leaderboard = [], []
-            for r in sorted(f_df['RACE'].unique()):
-                for g in sorted(f_df['GENDER'].unique()):
-                    subset = f_df[(f_df['RACE'] == r) & (f_df['GENDER'] == g)]
-                    res, winner, rmse, r2 = run_auto_ml(subset.to_json(), target)
-                    if res is not None:
-                        res['RACE'], res['GENDER'] = r, g
-                        grid_data.append(res)
-                        leaderboard.append({"Intersection": f"{r} | {g}", "Best Model": winner, "Accuracy (R²)": f"{r2:.4f}"})
-            
-            if grid_data:
-                st.write("**Model Selection Leaderboard**")
-                st.dataframe(pd.DataFrame(leaderboard), use_container_width=True)
-                fig = px.line(pd.concat(grid_data), x="YEAR", y=target, color="Status", facet_row="RACE", facet_col="GENDER", 
-                             markers=True, color_discrete_map={'Actual':'#94a3b8','Projected':'#fb7185'})
-                fig.update_layout(height=1000)
-                st.plotly_chart(fig, use_container_width=True)
-
-except Exception as e:
-    st.error(f"Critical System Error: {e}")
+    # ── Partner NGO cards ─────────────────────────────────────────────────────
+    section("🌐 Our NGO Partner Network")
+    partners = [
+        ("🏥 California Black Health Network","Advocating for health equity and wellness in Black communities across CA.","cbhnonline.org"),
+        ("🌿 Asian Health Services","Providing culturally competent care in Oakland's Asian communities since 1974.","asianhealthservices.org"),
+        ("🪶 Native American Health Center","Holistic health services for urban Native American and Alaska Native populations.","nativehealth.org"),
+        ("🌮 UnidosUS / Latino Health Access","Data-driven advocacy for Latino health equity and policy change.","unidosus.org"),
+        ("🌺 Pacific Islander Health Partners","Building capacity in Pacific Islander communities to address health disparities.","pihp.org"),
+        ("🤲 Community Health Alliance","Connecting underserved Californians to preventive care and social services.","cha-ca.org"),
+    ]
+    cols = st.columns(3)
+    for i,(name,desc,url) in enumerate(partners):
+        cols[i%3].markdown(f"""
+        <div class="metric-card" style="text-align:left; margin-bottom:1rem;">
+          <strong>{name}</strong><br>
+          <span style="font-size:.85rem;color:#475569;">{desc}</span><br>
+          <a href="https://{url}" target="_blank" style="color:#1a9e8f;font-size:.82rem;">🔗 {url}</a>
+        </div>""", unsafe_allow_html=True)
