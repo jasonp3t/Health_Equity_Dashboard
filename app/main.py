@@ -683,6 +683,7 @@ We evaluated three models before settling on **Gradient Boosting Regressor (GBR)
     model, mae, r2, importances, le_r, le_g, le_i = train_model(df)
 
     def forecast_to_2030(df):
+   
     df_model = df.copy()
 
     le_race = LabelEncoder()
