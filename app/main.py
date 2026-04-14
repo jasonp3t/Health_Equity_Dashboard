@@ -682,6 +682,37 @@ We evaluated three models before settling on **Gradient Boosting Regressor (GBR)
 
     model, mae, r2, importances, le_r, le_g, le_i = train_model(df)
 
+    def forecast_to_2030(df):
+    df_model = df.copy()
+
+    le_race = LabelEncoder()
+    le_gender = LabelEncoder()
+
+    df_model['race_enc'] = le_race.fit_transform(df_model['race'])
+    df_model['gender_enc'] = le_gender.fit_transform(df_model['gender'])
+
+    X = df_model[['encounter_year','race_enc','gender_enc','age','income']]
+    y = df_model['total_claim_cost']
+
+    model = RandomForestRegressor(n_estimators=150, random_state=42)
+    model.fit(X,y)
+
+    future_years = list(range(2024,2031))
+    future_data = []
+
+    for yr in future_years:
+        temp = df_model.sample(300, replace=True).copy()
+        temp['encounter_year'] = yr
+        future_data.append(temp)
+
+    future_df = pd.concat(future_data)
+
+    X_future = future_df[['encounter_year','race_enc','gender_enc','age','income']]
+    future_df['predicted_cost'] = model.predict(X_future)
+
+    return future_df
+
+
     c1,c2 = st.columns(2)
     c1.markdown(f'<div class="metric-card"><div class="metric-value">${mae:,.2f}</div>'
                 f'<div class="metric-label">Mean Absolute Error</div></div>',
