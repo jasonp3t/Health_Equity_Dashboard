@@ -671,8 +671,8 @@ We evaluated three models before settling on **Gradient Boosting Regressor (GBR)
                  'encounter_year','income_enc']
         X = dfc[feats]; y = dfc['total_claim_cost']
         X_tr, X_te, y_tr, y_te = train_test_split(X, y, test_size=.2, random_state=42)
-        model = GradientBoostingRegressor(n_estimators=100, max_depth=4,
-                                          learning_rate=.08, random_state=54)
+        model = GradientBoostingRegressor(n_estimators=200, max_depth=5,
+                                          learning_rate=.08, random_state=42)
         model.fit(X_tr, y_tr)
         preds = model.predict(X_te)
         mae = mean_absolute_error(y_te, preds)
