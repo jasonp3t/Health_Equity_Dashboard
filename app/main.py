@@ -681,37 +681,35 @@ We evaluated three models before settling on **Gradient Boosting Regressor (GBR)
         return model, mae, r2, importances, le_r, le_g, le_i
 
     model, mae, r2, importances, le_r, le_g, le_i = train_model(df)
-
     def forecast_to_2030(df):
-   
     df_model = df.copy()
-
-    le_race = LabelEncoder()
-    le_gender = LabelEncoder()
-
-    df_model['race_enc'] = le_race.fit_transform(df_model['race'])
-    df_model['gender_enc'] = le_gender.fit_transform(df_model['gender'])
-
-    X = df_model[['encounter_year','race_enc','gender_enc','age','income']]
-    y = df_model['total_claim_cost']
-
-    model = RandomForestRegressor(n_estimators=150, random_state=42)
-    model.fit(X,y)
-
-    future_years = list(range(2024,2031))
-    future_data = []
-
-    for yr in future_years:
+from sklearn.preprocessing import LabelEncoder
+from sklearn.ensemble import RandomForestRegressor
+le_race = LabelEncoder()
+le_gender = LabelEncoder()
+le_city = LabelEncoder()
+df_model['race_enc'] = le_race.fit_transform(df_model['race'])
+df_model['gender_enc'] = le_gender.fit_transform(df_model['gender'])
+df_model['city_enc'] = le_city.fit_transform(df_model['city'])
+ X = df_model[['encounter_year', 'race_enc', 'gender_enc', 'age', 'city_enc', 'income']]
+y = df_model['total_claim_cost']
+model = RandomForestRegressor(n_estimators=100, random_state=42)
+model.fit(X, y)
+ future_years = list(range(2024, 2031))
+future_data = []
+for year in future_years:
         temp = df_model.sample(300, replace=True).copy()
-        temp['encounter_year'] = yr
+        temp['encounter_year'] = year
         future_data.append(temp)
 
     future_df = pd.concat(future_data)
 
-    X_future = future_df[['encounter_year','race_enc','gender_enc','age','income']]
-    future_df['predicted_cost'] = model.predict(X_future)
+    X_future = future_df[['encounter_year', 'race_enc', 'gender_enc', 'age', 'city_enc', 'income']]
+    future_df['predicted_claim_cost'] = model.predict(X_future)
 
     return future_df
+
+   
 
 
     c1,c2 = st.columns(2)
