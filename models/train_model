@@ -1,1 +1,35 @@
+import pandas as pd
+from sklearn.ensemble import RandomForestRegressor
+import joblib
+import os
+import re
+
+def train_model(df):
+    # Features and Target
+    features = ['AGE', 'INCOME', 'HEALTHCARE_COVERAGE']
+    target = 'TOTAL_CLAIM_COST'
+
+    # --- THE ULTIMATE FIX: Clean Strings & Fill NaNs ---
+    for col in features + [target]:
+        if col in df.columns:
+            # Remove $, commas, and whitespace, then convert to numeric
+            df[col] = pd.to_numeric(
+                df[col].astype(str).replace(r'[\$,\s]', '', regex=True), 
+                errors='coerce'
+            ).fillna(0)
+
+    X = df[features]
+    y = df[target]
+
+    # Ensure we actually have data to train on
+    if len(X) == 0:
+        return False
+
+    model = RandomForestRegressor(n_estimators=100, random_state=42)
+    model.fit(X, y)
+
+    os.makedirs('models', exist_ok=True)
+    joblib.dump(model, 'models/cost_predictor.pkl')
+    return True
+
 
