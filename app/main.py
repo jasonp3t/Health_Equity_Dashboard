@@ -661,7 +661,107 @@ We evaluated three models before settling on **Gradient Boosting Regressor (GBR)
         """)
 
     # ── Train model ──────────────────────────────────────────────────────────
+   # ════════════════════════════════════════════════════════════════════════════════
+#  PAGE 5 — PREDICTIVE FORECASTING (Optimized for 2030)
+# ════════════════════════════════════════════════════════════════════════════════
+elif page == "🤖 Predictive Forecasting":
+    section("🤖 Predictive Forecasting — 2030 Trend Analysis")
+
+    # ── Optimized Model Training ─────────────────────────────────────────────
     @st.cache_data
+    def train_optimized_model(df):
+        dfc = df.copy()
+        
+        # Encoders
+        le_r = LabelEncoder(); dfc['race_enc'] = le_r.fit_transform(dfc['race'])
+        le_g = LabelEncoder(); dfc['gender_enc'] = le_g.fit_transform(dfc['gender'])
+        le_i = LabelEncoder(); dfc['income_enc'] = le_i.fit_transform(dfc['income_band'].astype(str))
+        
+        feats = ['race_enc', 'gender_enc', 'age', 'income', 'insurance_pct', 'encounter_year', 'income_enc']
+        X = dfc[feats]
+        y = dfc['total_claim_cost']
+        
+        X_tr, X_te, y_tr, y_te = train_test_split(X, y, test_size=.2, random_state=42)
+        
+        # Optimized Hyperparameters for Lower MAE
+        # Increased n_estimators and adjusted learning rate for better convergence
+        model = GradientBoostingRegressor(
+            n_estimators=150, 
+            learning_rate=0.05, 
+            max_depth=5, 
+            min_samples_split=5,
+            loss='absolute_error', # Directly optimizes for MAE
+            random_state=42
+        )
+        
+        model.fit(X_tr, y_tr)
+        preds = model.predict(X_te)
+        mae = mean_absolute_error(y_te, preds)
+        r2 = r2_score(y_te, preds)
+        
+        return model, mae, r2, feats, le_r, le_g, le_i
+
+    model, mae, r2, feats, le_r, le_g, le_i = train_optimized_model(df)
+
+    # ── Metric Display ────────────────────────────────────────────────────────
+    c1, c2 = st.columns(2)
+    c1.markdown(f'<div class="metric-card"><div class="metric-value">${mae:,.2f}</div>'
+                f'<div class="metric-label">Mean Absolute Error (Lower is Better)</div></div>', unsafe_allow_html=True)
+    c2.markdown(f'<div class="metric-card"><div class="metric-value">{r2:.3f}</div>'
+                f'<div class="metric-label">R² Score (Accuracy)</div></div>', unsafe_allow_html=True)
+
+    # ── 2030 Future Prediction Logic ─────────────────────────────────────────
+    section("📅 Horizon 2030: Projected Cost Trends")
+    
+    # Create future years
+    future_years = list(range(2024, 2031))
+    
+    # Selection for Projection
+    p_race = st.selectbox("Select Race for 2030 Projection:", df.race.unique())
+    p_gender = st.selectbox("Select Gender for 2030 Projection:", df.gender.unique())
+    
+    # Generate synthetic future data points for prediction
+    # We take the average stats for the selected group to project forward
+    base_stats = df[(df.race == p_race) & (df.gender == p_gender)]
+    
+    future_data = []
+    for yr in future_years:
+        future_data.append({
+            'race_enc': le_r.transform([p_race])[0],
+            'gender_enc': le_g.transform([p_gender])[0],
+            'age': base_stats['age'].mean(),
+            'income': base_stats['income'].mean(),
+            'insurance_pct': base_stats['insurance_pct'].mean(),
+            'encounter_year': yr,
+            'income_enc': le_i.transform([str(base_stats['income_band'].mode()[0])])[0]
+        })
+    
+    future_df = pd.DataFrame(future_data)
+    future_preds = model.predict(future_df[feats])
+    
+    # Historical data for the chart
+    hist_yr = df[(df.race == p_race) & (df.gender == p_gender)].groupby('encounter_year')['total_claim_cost'].mean().reset_index()
+    
+    # ── Projection Chart ──────────────────────────────────────────────────────
+    fig_proj = go.Figure()
+    # Historical Line
+    fig_proj.add_trace(go.Scatter(x=hist_yr['encounter_year'], y=hist_yr['total_claim_cost'], 
+                                 name='Historical Actual', line=dict(color='#0d7a6e', width=3)))
+    # Prediction Line
+    fig_proj.add_trace(go.Scatter(x=future_years, y=future_preds, 
+                                 name='2030 Projection', line=dict(color='#ef4444', width=3, dash='dash')))
+    
+    fig_proj.update_layout(title=f"Predicted Claim Cost Trend for {p_race} {p_gender} through 2030",
+                          xaxis_title="Year", yaxis_title="Avg Claim Cost ($)",
+                          plot_bgcolor='white', height=450)
+    st.plotly_chart(fig_proj, use_container_width=True)
+
+    # ── Feature Importance (Why the costs are changing) ──────────────────────
+    section("📊 Prediction Drivers")
+    fi_df = pd.DataFrame({'Feature': feats, 'Importance': model.feature_importances_}).sort_values('Importance')
+    fig_fi = px.bar(fi_df, x='Importance', y='Feature', orientation='h', 
+                    color_continuous_scale='mint', title='What drives the 2030 Forecast?')
+    st.plotly_chart(fig_fi, use_container_width=True) @st.cache_data
     def train_model(df):
         dfc = df.copy()
         le_r = LabelEncoder(); dfc['race_enc']   = le_r.fit_transform(dfc['race'])
