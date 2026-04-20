@@ -126,10 +126,10 @@ CA_COUNTIES = {
 }
 
 @st.cache_data
-def generate_data(n=2272):
+def generate_data(n=5000):
     np.random.seed(42)
     races  = ['White','Black','Asian','Hawaiian','Native','Other']
-    rw     = np.array([1640,134,370,33,35,60],dtype=float); rw /= rw.sum()
+    rw     = np.array([3614,295,815,73,77,126],dtype=float); rw /= rw.sum()
     race   = np.random.choice(races, n, p=rw)
     gender = np.random.choice(['Male','Female'], n, p=[0.479,0.521])
     age    = np.random.randint(0,111,n)
@@ -182,7 +182,7 @@ with st.sidebar:
         "📬 Contact & Feedback"
     ])
     st.markdown("---")
-    st.markdown("**Dataset:** Synthea CA (n=2,272)")
+    st.markdown("**Dataset:** Synthea CA (n=5,000)")
     st.markdown(f"**Counties:** {len(CA_COUNTIES)} CA counties")
     st.markdown("**Encounter years:** 2015–2023")
 
@@ -201,7 +201,7 @@ if page == "📊 Dashboard":
     section("📌 Population Overview")
     cols = st.columns(5)
     for col,(v,l) in zip(cols,[
-        ("2,272","Total Patients"),
+        ("5,000","Total Patients"),
         (f"${df.total_claim_cost.mean():,.0f}","Avg Claim Cost"),
         (f"${df.income.mean():,.0f}","Avg Income"),
         (f"{df.insurance_pct.mean():.1f}%","Avg Insurance"),
