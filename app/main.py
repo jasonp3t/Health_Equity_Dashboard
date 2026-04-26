@@ -85,6 +85,35 @@ GENDER_COLORS = {'Male':'#1a9e8f','Female':'#f59e0b'}
 ALL_RACES  = ['White','Black','Asian','Hawaiian','Native','Other']
 ALL_INCOME = ['<$25k','$25-50k','$50-75k','$75-100k','>$100k']
 
+# ─── Bilingual hover helper ───────────────────────────────────────────────────
+def make_hover(technical_lines, plain_lines, extra_tag=""):
+    tech  = "<br>".join(technical_lines)
+    plain = "<br>".join(plain_lines)
+    tag   = extra_tag if extra_tag else "<extra></extra>"
+    return (
+        "<b>📊 Data</b><br>"
+        + tech
+        + "<br><br><b>💡 What this means</b><br>"
+        + "<i>" + plain + "</i>"
+        + tag
+    )
+
+RACE_INSIGHTS = {
+    'White':    'White patients generally have higher income & insurance — set as baseline for equity comparisons.',
+    'Asian':    'Asian patients have strong insurance coverage, reflecting relatively good healthcare access.',
+    'Black':    'Black patients face lower income and insurance coverage — a significant equity concern.',
+    'Hawaiian': 'Pacific Islander patients show lower insurance coverage, indicating real access barriers.',
+    'Native':   'Native patients have the largest income gap and lowest insurance of all groups — highest priority for NGO intervention.',
+    'Other':    'Patients outside the main race categories — moderate income and insurance levels on average.',
+}
+INCOME_INSIGHTS = {
+    '<$25k':    'Under $25k/year — most financially vulnerable, often uninsured. High risk of skipping care due to cost.',
+    '$25-50k':  'Lower-middle income — at risk of financial hardship from unexpected medical bills.',
+    '$50-75k':  'Middle income — some coverage gaps remain; moderate financial vulnerability.',
+    '$75-100k': 'Upper-middle income — generally better insured but costs can still strain budgets.',
+    '>$100k':   'High income — highest insurance coverage and least financial vulnerability to medical costs.',
+}
+
 def section(title):
     st.markdown(f'<div class="section-header">{title}</div>', unsafe_allow_html=True)
 
@@ -224,16 +253,42 @@ if page == "📊 Dashboard":
     c1,c2 = st.columns(2)
     with c1:
         rc=df.race.value_counts().reset_index(); rc.columns=['Race','Count']
+        rc['insight'] = rc['Race'].map(RACE_INSIGHTS)
         f=px.bar(rc,x='Race',y='Count',color='Race',color_discrete_map=RACE_COLORS,
-                 title='Patient Count by Race',text='Count')
+                 title='Patient Count by Race',text='Count',
+                 custom_data=['insight'])
+        f.update_traces(
+            textposition='outside',
+            hovertemplate=make_hover(
+                ["<b>Race:</b> %{x}","<b>Patient Count:</b> %{y:,}"],
+                ["%{customdata[0]}"]
+            )
+        )
         f.update_layout(showlegend=False,plot_bgcolor='white',height=320)
-        f.update_traces(textposition='outside'); st.plotly_chart(f,use_container_width=True)
+        st.plotly_chart(f,use_container_width=True)
     with c2:
         ac=df.groupby('race')['total_claim_cost'].mean().reset_index(); ac.columns=['Race','Avg']
+        ac['pct_above_mean'] = ((ac['Avg'] - ac['Avg'].mean()) / ac['Avg'].mean() * 100).round(1)
+        ac['insight'] = ac.apply(lambda r:
+            f"{r['Race']} patients average ${r['Avg']:,.0f} per claim — "
+            f"{'%+.1f' % r['pct_above_mean']}% vs the overall average. "
+            + ("This group faces above-average financial burden." if r['pct_above_mean'] > 5
+               else "This group is close to the population average."
+               if abs(r['pct_above_mean']) <= 5
+               else "This group has below-average claim costs."), axis=1)
         f=px.bar(ac,x='Race',y='Avg',color='Race',color_discrete_map=RACE_COLORS,
-                 title='Avg Claim Cost by Race ($)',text=ac['Avg'].map('${:,.0f}'.format))
+                 title='Avg Claim Cost by Race ($)',text=ac['Avg'].map('${:,.0f}'.format),
+                 custom_data=['insight','pct_above_mean'])
+        f.update_traces(
+            textposition='outside',
+            hovertemplate=make_hover(
+                ["<b>Race:</b> %{x}","<b>Avg Claim Cost:</b> $%{y:,.0f}",
+                 "<b>vs Overall Avg:</b> %{customdata[1]:+.1f}%"],
+                ["%{customdata[0]}"]
+            )
+        )
         f.update_layout(showlegend=False,plot_bgcolor='white',height=320)
-        f.update_traces(textposition='outside'); st.plotly_chart(f,use_container_width=True)
+        st.plotly_chart(f,use_container_width=True)
 
     c3,c4 = st.columns(2)
     with c3:
@@ -241,13 +296,42 @@ if page == "📊 Dashboard":
                        nbins=40,barmode='overlay',opacity=.65,
                        title='Income Distribution by Race',labels={'income':'Annual Income ($)'})
         f.update_xaxes(tickformat='$,.0f')
+        f.update_traces(
+            hovertemplate=make_hover(
+                ["<b>Race:</b> %{fullData.name}",
+                 "<b>Income Range:</b> %{x}",
+                 "<b>Patient Count in Range:</b> %{y}"],
+                ["Each bar shows how many patients of this race fall in this income range.",
+                 "Taller bars = more patients at that income level.",
+                 "Bars shifted left = lower incomes, indicating greater financial hardship."]
+            )
+        )
         f.update_layout(plot_bgcolor='white',height=320); st.plotly_chart(f,use_container_width=True)
     with c4:
         ai=df.groupby('race')['insurance_pct'].mean().reset_index(); ai.columns=['Race','Avg']
+        ai['gap_vs_white'] = (ai['Avg'] - ai[ai['Race']=='White']['Avg'].values[0]).round(1)
+        ai['insight'] = ai.apply(lambda r:
+            f"On average, {r['Race']} patients have {r['Avg']:.1f}% insurance coverage. "
+            + (f"This is {abs(r['gap_vs_white']):.1f} percentage points "
+               + ("below" if r['gap_vs_white'] < 0 else "above")
+               + " White patients — "
+               + ("a serious equity gap that NGOs should prioritise." if r['gap_vs_white'] < -10
+                  else "a notable disparity worth monitoring." if r['gap_vs_white'] < -5
+                  else "roughly comparable coverage levels." if abs(r['gap_vs_white']) <= 5
+                  else "above-average access to insurance.")), axis=1)
         f=px.bar(ai,x='Race',y='Avg',color='Race',color_discrete_map=RACE_COLORS,
-                 title='Avg Insurance Coverage % by Race',text=ai['Avg'].map('{:.1f}%'.format))
+                 title='Avg Insurance Coverage % by Race',text=ai['Avg'].map('{:.1f}%'.format),
+                 custom_data=['insight','gap_vs_white'])
+        f.update_traces(
+            textposition='outside',
+            hovertemplate=make_hover(
+                ["<b>Race:</b> %{x}","<b>Avg Insurance Coverage:</b> %{y:.1f}%",
+                 "<b>Gap vs White patients:</b> %{customdata[1]:+.1f}pp"],
+                ["%{customdata[0]}"]
+            )
+        )
         f.update_layout(showlegend=False,plot_bgcolor='white',height=320)
-        f.update_traces(textposition='outside'); st.plotly_chart(f,use_container_width=True)
+        st.plotly_chart(f,use_container_width=True)
 
     section("📋 Top 10 Demographic Segments by Claim Cost")
     t=(df.groupby(['race','income_band'])
@@ -307,25 +391,58 @@ elif page == "🗺️ Interactive Map":
             f'({" | ".join(conds)}): <strong>{", ".join(flagged.county.tolist())}</strong></div>',
             unsafe_allow_html=True)
 
+    # Build plain-English interpretation per county for hover
+    def county_plain(row):
+        ins = row['avg_insurance']
+        inc = row['avg_income']
+        clm = row['avg_claim']
+        ins_msg = ("⚠️ Well below average — significant uninsurance risk" if ins < 65
+                   else "⚠️ Below average — some coverage gaps" if ins < 75
+                   else "✅ Near or above average coverage")
+        inc_msg = ("⚠️ Low income area — patients may skip care due to cost" if inc < 40000
+                   else "⚠️ Below-average income — financial vulnerability present" if inc < 55000
+                   else "✅ Near or above average income")
+        clm_msg = ("⚠️ High claim costs — patients face larger financial burden" if clm > 700
+                   else "✅ Claim costs near population average")
+        flag_msg = "🚩 This county meets your flagging condition — prioritise for NGO outreach." if row['flagged'] else ""
+        return f"{ins_msg}<br>{inc_msg}<br>{clm_msg}" + (f"<br>{flag_msg}" if flag_msg else "")
+
+    cagg['plain_english'] = cagg.apply(county_plain, axis=1)
+
     fig_map = px.scatter_mapbox(
         cagg, lat='lat', lon='lon', size='patient_count', color=mc,
         color_continuous_scale=csc, hover_name='county',
         hover_data={
             'avg_income':':.0f','avg_insurance':':.1f','avg_claim':':.0f',
-            'patient_count':':,','lat':False,'lon':False,'flagged':False
+            'patient_count':':,','lat':False,'lon':False,'flagged':False,'plain_english':True
         },
         labels={'avg_income':'Avg Income ($)','avg_insurance':'Avg Insurance (%)',
-                'avg_claim':'Avg Claim ($)','patient_count':'Patients'},
+                'avg_claim':'Avg Claim ($)','patient_count':'Patients',
+                'plain_english':'💡 Plain English'},
         size_max=40, zoom=4.8,
         center={"lat":37.5,"lon":-119.5},
         mapbox_style="carto-positron",
         title=f"All CA Counties — {map_metric} (n={len(cagg)} counties shown)"
     )
+    # Bigger, more visible flagged county markers
     if len(flagged):
         fig_map.add_trace(go.Scattermapbox(
             lat=flagged.lat, lon=flagged.lon, mode='markers',
-            marker=dict(size=16, color='red', symbol='star'),
-            name='⚠️ Flagged', text=flagged.county, hoverinfo='text'
+            marker=dict(size=28, color='red', symbol='star'),
+            name='⚠️ Flagged County',
+            text=flagged.apply(lambda r:
+                f"<b>⚠️ {r['county']} — FLAGGED</b><br>"
+                f"<b>📊 Data</b><br>"
+                f"Avg Insurance: {r['avg_insurance']:.1f}%<br>"
+                f"Avg Income: ${r['avg_income']:,.0f}<br>"
+                f"Avg Claim: ${r['avg_claim']:,.0f}<br>"
+                f"Patients: {r['patient_count']:,}<br><br>"
+                f"<b>💡 What this means</b><br>"
+                f"<i>This county has been flagged because it does not meet<br>"
+                f"your equity threshold. It should be prioritised for<br>"
+                f"NGO resource allocation and outreach programmes.</i>",
+                axis=1),
+            hoverinfo='text'
         ))
     fig_map.update_layout(height=600, margin=dict(l=0,r=0,t=40,b=0))
     st.plotly_chart(fig_map, use_container_width=True)
@@ -343,19 +460,49 @@ elif page == "🗺️ Interactive Map":
     section("🧩 Race Breakdown — Top 12 Counties")
     top12 = cagg.nlargest(12,'patient_count').county.tolist()
     cr = dff[dff.county.isin(top12)].groupby(['county','race']).size().reset_index(name='n')
+    cr['pct'] = cr.groupby('county')['n'].transform(lambda x: (x/x.sum()*100).round(1))
+    cr['insight'] = cr.apply(lambda r:
+        f"{r['race']} patients make up {r['pct']:.1f}% of {r['county']} County. "
+        + RACE_INSIGHTS.get(r['race'],''), axis=1)
     f = px.bar(cr,x='county',y='n',color='race',color_discrete_map=RACE_COLORS,
                title='Race Breakdown — Top 12 Counties',
-               labels={'n':'Patients','county':'County'})
+               labels={'n':'Patients','county':'County'},
+               custom_data=['pct','insight'])
+    f.update_traces(
+        hovertemplate=make_hover(
+            ["<b>County:</b> %{x}","<b>Race:</b> %{fullData.name}",
+             "<b>Patients:</b> %{y:,}","<b>Share of County:</b> %{customdata[0]:.1f}%"],
+            ["%{customdata[1]}"]
+        )
+    )
     f.update_layout(plot_bgcolor='white',height=380,xaxis_tickangle=-30)
     st.plotly_chart(f,use_container_width=True)
 
     section("💰 Insurance Coverage vs Income by County")
+    cagg['scatter_insight'] = cagg.apply(lambda r:
+        ("⚠️ High-risk county: low income AND low insurance — double burden on residents." if r['avg_income'] < 50000 and r['avg_insurance'] < 70
+         else "⚠️ Low income but decent insurance — may be benefiting from public programmes." if r['avg_income'] < 50000
+         else "⚠️ Good income but lower insurance — may reflect specific workforce composition." if r['avg_insurance'] < 70
+         else "✅ Relatively good income and insurance — less urgent equity concern."), axis=1)
     f2 = px.scatter(cagg,x='avg_income',y='avg_insurance',
                     size='patient_count',color='avg_claim',
                     color_continuous_scale='RdYlGn_r',hover_name='county',
+                    custom_data=['patient_count','avg_claim','scatter_insight'],
                     labels={'avg_income':'Avg Income ($)','avg_insurance':'Avg Insurance (%)',
                             'avg_claim':'Avg Claim ($)'},
                     title='Insurance vs Income (bubble = patient count, colour = claim cost)')
+    f2.update_traces(
+        hovertemplate=make_hover(
+            ["<b>County:</b> %{hovertext}",
+             "<b>Avg Income:</b> $%{x:,.0f}",
+             "<b>Avg Insurance:</b> %{y:.1f}%",
+             "<b>Avg Claim Cost:</b> $%{customdata[1]:,.0f}",
+             "<b>Patients:</b> %{customdata[0]:,}"],
+            ["%{customdata[2]}",
+             "Bottom-left counties (low income + low insurance) are most underserved.",
+             "Top-right counties have better income AND coverage — less urgent need."]
+        )
+    )
     f2.update_layout(plot_bgcolor='white',height=420)
     st.plotly_chart(f2,use_container_width=True)
 
@@ -478,10 +625,27 @@ elif page == "⚖️ Intersectional Comparison":
 
     section(f"📦 {out_lbl} — Box Plots (shared colour legend)")
     bl,br = st.columns(2)
+
+    out_plain = {"total_claim_cost":"total medical claim cost",
+                 "insurance_pct":"insurance coverage percentage",
+                 "income":"annual income"}[outcome]
+
     with bl:
         f=px.box(dff,x='race',y=outcome,color='race',color_discrete_map=RACE_COLORS,
                  category_orders={'race':ALL_RACES},title=f'{out_lbl} by Race',
                  labels={outcome:out_lbl,'race':'Race'})
+        f.update_traces(
+            hovertemplate=make_hover(
+                ["<b>Race:</b> %{x}",
+                 "<b>Median:</b> %{median:,.1f}",
+                 "<b>Lower Quartile (Q1):</b> %{q1:,.1f}",
+                 "<b>Upper Quartile (Q3):</b> %{q3:,.1f}"],
+                ["The box shows the middle 50% of " + out_plain + " for this group.",
+                 "A higher median means this group typically pays more / earns more / is more insured.",
+                 "A wider box means more variation within the group.",
+                 "%{x} — " + "See Dashboard for full group context."]
+            )
+        )
         f.update_layout(plot_bgcolor='white',height=400)
         st.plotly_chart(f,use_container_width=True)
     with br:
@@ -489,23 +653,55 @@ elif page == "⚖️ Intersectional Comparison":
                  category_orders={'race':ALL_RACES},
                  title=f'{out_lbl} by Gender (colour = Race — same legend)',
                  labels={outcome:out_lbl,'gender':'Gender'})
+        f.update_traces(
+            hovertemplate=make_hover(
+                ["<b>Gender:</b> %{x}","<b>Race:</b> %{fullData.name}",
+                 "<b>Median:</b> %{median:,.1f}",
+                 "<b>Q1–Q3 Range:</b> %{q1:,.1f} – %{q3:,.1f}"],
+                ["This shows " + out_plain + " for a specific gender × race combination.",
+                 "Comparing left and right bars reveals gender-based disparities within the same race.",
+                 "If boxes are very different heights, it suggests an equity gap between genders."]
+            )
+        )
         f.update_layout(plot_bgcolor='white',height=400)
         st.plotly_chart(f,use_container_width=True)
 
     section(f"💳 {out_lbl} — Income Band × Race (shared colour legend)")
     grp=(dff.groupby(['income_band','race'])[outcome].mean().reset_index())
     grp.columns=['Income Band','Race',out_lbl]
+    grp['income_insight'] = grp['Income Band'].map(INCOME_INSIGHTS)
+    grp['race_insight']   = grp['Race'].map(RACE_INSIGHTS)
     il,ir = st.columns(2)
     with il:
         f=px.bar(grp,x='Income Band',y=out_lbl,color='Race',color_discrete_map=RACE_COLORS,
                  barmode='group',title=f'{out_lbl} by Income Band',
-                 category_orders={'Income Band':ALL_INCOME,'Race':ALL_RACES})
+                 category_orders={'Income Band':ALL_INCOME,'Race':ALL_RACES},
+                 custom_data=['income_insight','race_insight'])
+        f.update_traces(
+            hovertemplate=make_hover(
+                ["<b>Income Band:</b> %{x}","<b>Race:</b> %{fullData.name}",
+                 "<b>Avg " + out_lbl + ":</b> %{y:,.1f}"],
+                ["<b>About this income group:</b> %{customdata[0]}",
+                 "<b>About this race group:</b> %{customdata[1]}",
+                 "Taller bars = higher average " + out_plain + " for this intersection."]
+            )
+        )
         f.update_layout(plot_bgcolor='white',height=420)
         st.plotly_chart(f,use_container_width=True)
     with ir:
         f=px.bar(grp,x='Race',y=out_lbl,color='Income Band',color_discrete_map=INCOME_COLORS,
                  barmode='group',title=f'{out_lbl} by Race × Income Band',
-                 category_orders={'Income Band':ALL_INCOME,'Race':ALL_RACES})
+                 category_orders={'Income Band':ALL_INCOME,'Race':ALL_RACES},
+                 custom_data=['income_insight','race_insight'])
+        f.update_traces(
+            hovertemplate=make_hover(
+                ["<b>Race:</b> %{x}","<b>Income Band:</b> %{fullData.name}",
+                 "<b>Avg " + out_lbl + ":</b> %{y:,.1f}"],
+                ["<b>About this income group:</b> %{customdata[0]}",
+                 "<b>About this race group:</b> %{customdata[1]}",
+                 "Groups with low income AND low insurance face the greatest combined burden."]
+            )
+        )
         f.update_layout(plot_bgcolor='white',height=420)
         st.plotly_chart(f,use_container_width=True)
 
@@ -533,7 +729,20 @@ elif page == "⚖️ Intersectional Comparison":
     fig_c=px.bar(cagg.sort_values('avg_insurance'),x='county',y='avg_insurance',
                  color='flagged',color_discrete_map={True:'#ef4444',False:'#1a9e8f'},
                  title='Avg Insurance Coverage % by County (red = flagged)',
-                 labels={'avg_insurance':'Avg Insurance (%)','county':'County'})
+                 labels={'avg_insurance':'Avg Insurance (%)','county':'County'},
+                 custom_data=['avg_claim','avg_income','count','flagged'])
+    fig_c.update_traces(
+        hovertemplate=make_hover(
+            ["<b>County:</b> %{x}",
+             "<b>Avg Insurance Coverage:</b> %{y:.1f}%",
+             "<b>Avg Claim Cost:</b> $%{customdata[0]:,.0f}",
+             "<b>Avg Income:</b> $%{customdata[1]:,.0f}",
+             "<b>Patients:</b> %{customdata[2]:,}"],
+            ["Counties below 75% insurance coverage (left side of chart) are priority areas for NGO outreach.",
+             "Red bars have been flagged by your threshold settings — these need immediate attention.",
+             "Low insurance often means patients delay care, leading to higher costs when they do seek help."]
+        )
+    )
     fig_c.add_hline(y=75,line_dash='dash',line_color='orange',
                     annotation_text='75% reference line')
     fig_c.update_layout(plot_bgcolor='white',height=400,xaxis_tickangle=-45,showlegend=False)
@@ -546,6 +755,15 @@ elif page == "⚖️ Intersectional Comparison":
                  color_continuous_scale='RdYlGn_r' if outcome=='total_claim_cost' else 'RdYlGn',
                  aspect='auto',labels={'color':out_lbl},
                  title=f'Mean {out_lbl}: Race × Income Band')
+    fh.update_traces(
+        hovertemplate=make_hover(
+            ["<b>Race:</b> %{y}","<b>Income Band:</b> %{x}","<b>Avg " + out_lbl + ":</b> %{z:,.1f}"],
+            ["Each cell shows the average " + out_plain + " for one race × income intersection.",
+             "Darker red cells (on claim cost) = highest burden — these intersections need the most support.",
+             "Comparing cells across a row shows how income affects outcomes within a race group.",
+             "Comparing cells down a column shows how race affects outcomes within an income group."]
+        )
+    )
     fh.update_layout(height=360)
     st.plotly_chart(fh,use_container_width=True)
 
@@ -672,13 +890,47 @@ We compared **three candidate models** before selecting GBR:
                                'Importance': list(importances.values())}).sort_values('Importance')
         f = px.bar(fi_df, x='Importance', y='Feature', orientation='h',
                    color='Importance', color_continuous_scale='teal',
-                   title='Feature Importance (GBR, log-target)')
+                   title='Feature Importance (GBR, log-target)',
+                   custom_data=[fi_df['Importance'].values])
+        feat_plain = {
+            'Income (log)':           'How much the patient earns — the single biggest driver of claim costs.',
+            'Insurance %':            'How well insured the patient is — low coverage = higher out-of-pocket burden.',
+            'Income/Insurance Ratio': 'Combined burden of low income AND low coverage — captures the "double jeopardy" effect.',
+            'Age':                    'Older patients typically have higher healthcare needs.',
+            'Age²':                   'Age has a non-linear effect — very young children and elderly cost the most.',
+            'Race':                   'Race captures systemic inequities not fully explained by income alone.',
+            'Gender':                 'Biological and social gender differences affect healthcare utilisation.',
+            'Income Band':            'Ordinal income grouping — helps the model learn threshold effects.',
+        }
+        fi_df['plain'] = fi_df['Feature'].map(lambda x: feat_plain.get(x, 'Contributes to claim cost prediction.'))
+        f = px.bar(fi_df, x='Importance', y='Feature', orientation='h',
+                   color='Importance', color_continuous_scale='teal',
+                   title='Feature Importance (GBR, log-target)',
+                   custom_data=['plain'])
+        f.update_traces(
+            hovertemplate=make_hover(
+                ["<b>Feature:</b> %{y}","<b>Importance Score:</b> %{x:.3f}"],
+                ["%{customdata[0]}",
+                 "Higher score = this variable explains more of the variation in claim costs.",
+                 "Income and Insurance are top drivers — consistent with health equity theory."]
+            )
+        )
         f.update_layout(plot_bgcolor='white', height=340, showlegend=False)
         st.plotly_chart(f, use_container_width=True)
     with res_col:
         fig_res = go.Figure()
-        fig_res.add_trace(go.Scatter(x=preds, y=residuals, mode='markers',
-                                      marker=dict(color='#1a9e8f', opacity=0.3, size=3)))
+        fig_res.add_trace(go.Scatter(
+            x=preds, y=residuals, mode='markers',
+            marker=dict(color='#1a9e8f', opacity=0.3, size=3),
+            hovertemplate=make_hover(
+                ["<b>Predicted Claim Cost:</b> $%{x:,.0f}",
+                 "<b>Residual (Actual − Predicted):</b> $%{y:,.0f}"],
+                ["Each dot is one patient.",
+                 "A residual near $0 means the model predicted that patient's cost accurately.",
+                 "No pattern in this scatter = the model is equally accurate across all cost levels.",
+                 "If dots formed a curve or funnel, the model would be biased — this plot confirms it is not."]
+            )
+        ))
         fig_res.add_hline(y=0, line_color='red', line_dash='dash')
         fig_res.update_layout(title='Residuals vs Predicted — random scatter = unbiased',
                                xaxis_title='Predicted Claim Cost ($)',
@@ -791,8 +1043,16 @@ We compared **three candidate models** before selecting GBR:
         # Actual observed dots
         fig_fc.add_trace(go.Scatter(
             x=yr_avg['year'], y=yr_avg['avg'],
-            mode='markers', marker=dict(color=clr, size=7, symbol='circle'),
-            showlegend=False, hovertemplate=f'{grp_val}<br>Year: %{{x}}<br>{fc_lbl}: %{{y:,.1f}}<extra></extra>'
+            mode='markers', marker=dict(color=clr, size=9, symbol='circle'),
+            showlegend=False,
+            hovertemplate=make_hover(
+                [f"<b>Group:</b> {grp_val}",
+                 "<b>Encounter Year:</b> %{x}",
+                 f"<b>Observed {fc_lbl}:</b> %{{y:,.1f}}"],
+                [f"This is the actual average {fc_lbl} recorded for {grp_val} patients in %{{x}}.",
+                 "Solid dots = real historical data from the Synthea dataset.",
+                 "The dashed line beyond 2023 is the model's projection — not real data."]
+            )
         ))
 
         forecast_table.append({
@@ -888,7 +1148,19 @@ We compared **three candidate models** before selecting GBR:
                 line=dict(color='rgba(0,0,0,0)'), showlegend=False, hoverinfo='skip'))
             fig_c.add_trace(go.Scatter(
                 x=yr.encounter_year, y=yr['mean'], mode='lines+markers',
-                line=dict(color=clr, width=2.5), marker=dict(size=6), name=str(x_val)))
+                line=dict(color=clr, width=2.5), marker=dict(size=6), name=str(x_val),
+                hovertemplate=make_hover(
+                    [f"<b>{x_axis.replace('_',' ').title()}:</b> {x_val}",
+                     f"<b>{y_axis.replace('_',' ').title()}:</b> {y_val}",
+                     "<b>Encounter Year:</b> %{x}",
+                     "<b>Avg " + out_lbl2 + ":</b> %{y:,.1f}"],
+                    ["This shows the average " + out_lbl2 + " for " + str(x_val) + " patients "
+                     "who are also " + str(y_val) + ".",
+                     "Rising lines mean this group's outcome is increasing over time.",
+                     "Shaded band = ±1 standard error (uncertainty in the average).",
+                     "Compare across cells in the same row to see how " + x_axis.replace('_',' ') + " drives differences."]
+                )
+            ))
             fig_c.update_layout(
                 title=dict(text=f"{x_val} (n={len(cell)})", font=dict(size=11)),
                 xaxis=dict(title='Encounter Year', tickmode='linear', dtick=2, tickfont=dict(size=9)),
