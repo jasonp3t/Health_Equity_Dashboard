@@ -117,15 +117,6 @@ INCOME_INSIGHTS = {
 def section(title):
     st.markdown(f'<div class="section-header">{title}</div>', unsafe_allow_html=True)
 
-def findings_box(text: str):
-    """Renders a plain-English findings box below a chart."""
-    st.markdown(
-        f'<div style="background:#f0fdf9;border-left:4px solid #1a9e8f;border-radius:8px;'
-        f'padding:0.65rem 1rem;margin:-0.3rem 0 0.8rem;font-size:0.88rem;color:#1e293b;">'
-        f'<span style="font-weight:700;color:#0d7a6e;">💡 Finding: </span>{text}</div>',
-        unsafe_allow_html=True
-    )
-
 def mcard(val, label):
     return (f'<div class="metric-card">'
             f'<div class="metric-value">{val}</div>'
@@ -275,11 +266,7 @@ if page == "📊 Dashboard":
         )
         f.update_layout(showlegend=False,plot_bgcolor='white',height=320)
         st.plotly_chart(f,use_container_width=True)
-        findings_box(
-            f"White patients make up the largest share of the dataset ({rc[rc.Race=='White']['Count'].values[0]:,} patients), "
-            f"while Native and Hawaiian patients are the smallest groups. Smaller groups may face higher individual risk "
-            f"if resources are distributed proportionally rather than by need."
-        )
+    with c2:
         ac=df.groupby('race')['total_claim_cost'].mean().reset_index(); ac.columns=['Race','Avg']
         ac['pct_above_mean'] = ((ac['Avg'] - ac['Avg'].mean()) / ac['Avg'].mean() * 100).round(1)
         ac['insight'] = ac.apply(lambda r:
@@ -302,12 +289,6 @@ if page == "📊 Dashboard":
         )
         f.update_layout(showlegend=False,plot_bgcolor='white',height=320)
         st.plotly_chart(f,use_container_width=True)
-        top_race = ac.sort_values('Avg',ascending=False).iloc[0]
-        findings_box(
-            f"{top_race['Race']} patients have the highest average claim cost (${top_race['Avg']:,.0f}). "
-            f"Higher claim costs combined with lower income means some groups pay a far greater share "
-            f"of their earnings on healthcare — a key measure of financial hardship."
-        )
 
     c3,c4 = st.columns(2)
     with c3:
@@ -326,12 +307,6 @@ if page == "📊 Dashboard":
             )
         )
         f.update_layout(plot_bgcolor='white',height=320); st.plotly_chart(f,use_container_width=True)
-        findings_box(
-            "The income distribution reveals stark inequality: Native and Black patients are heavily "
-            "concentrated in the lower income ranges (under $50,000), while White and Asian patients "
-            "spread further right towards higher incomes. This income gap directly drives differences "
-            "in who can afford healthcare and who cannot."
-        )
     with c4:
         ai=df.groupby('race')['insurance_pct'].mean().reset_index(); ai.columns=['Race','Avg']
         ai['gap_vs_white'] = (ai['Avg'] - ai[ai['Race']=='White']['Avg'].values[0]).round(1)
@@ -357,15 +332,8 @@ if page == "📊 Dashboard":
         )
         f.update_layout(showlegend=False,plot_bgcolor='white',height=320)
         st.plotly_chart(f,use_container_width=True)
-        lowest = ai.sort_values('Avg').iloc[0]
-        highest = ai.sort_values('Avg').iloc[-1]
-        gap = highest['Avg'] - lowest['Avg']
-        findings_box(
-            f"{lowest['Race']} patients have the lowest average insurance coverage ({lowest['Avg']:.1f}%), "
-            f"compared to {highest['Race']} patients at {highest['Avg']:.1f}% — a gap of {gap:.1f} percentage points. "
-            f"Patients without adequate insurance often delay seeking care, leading to more serious "
-            f"conditions and higher costs when they eventually do. This is the equity gap NGOs should target."
-        )
+
+    section("📋 Top 10 Demographic Segments by Claim Cost")
     t=(df.groupby(['race','income_band'])
          .agg(avg_claim=('total_claim_cost','mean'),avg_income=('income','mean'),
               avg_ins=('insurance_pct','mean'),enc=('total_claim_cost','count'))
@@ -456,15 +424,11 @@ elif page == "🗺️ Interactive Map":
         mapbox_style="carto-positron",
         title=f"All CA Counties — {map_metric} (n={len(cagg)} counties shown)"
     )
-    # Large, unmissable flagged county markers — circle-stroked supported by all Mapbox versions
+    # Bigger, more visible flagged county markers
     if len(flagged):
         fig_map.add_trace(go.Scattermapbox(
             lat=flagged.lat, lon=flagged.lon, mode='markers',
-            marker=dict(
-                size=40,                  # very large — clearly visible
-                color='rgba(239,68,68,0.85)',   # bright red semi-transparent fill
-                allowoverlap=True,
-            ),
+            marker=dict(size=28, color='red', symbol='star'),
             name='⚠️ Flagged County',
             text=flagged.apply(lambda r:
                 f"<b>⚠️ {r['county']} — FLAGGED</b><br>"
@@ -474,18 +438,11 @@ elif page == "🗺️ Interactive Map":
                 f"Avg Claim: ${r['avg_claim']:,.0f}<br>"
                 f"Patients: {r['patient_count']:,}<br><br>"
                 f"<b>💡 What this means</b><br>"
-                f"<i>This county does not meet your equity threshold.<br>"
-                f"Low insurance or high claim costs indicate residents are<br>"
-                f"financially vulnerable. Prioritise for NGO outreach and<br>"
-                f"resource allocation immediately.</i>",
+                f"<i>This county has been flagged because it does not meet<br>"
+                f"your equity threshold. It should be prioritised for<br>"
+                f"NGO resource allocation and outreach programmes.</i>",
                 axis=1),
             hoverinfo='text'
-        ))
-        # Second layer — white ring outline so flags pop on any background
-        fig_map.add_trace(go.Scattermapbox(
-            lat=flagged.lat, lon=flagged.lon, mode='markers',
-            marker=dict(size=48, color='rgba(255,255,255,0.0)', allowoverlap=True),
-            showlegend=False, hoverinfo='skip',
         ))
     fig_map.update_layout(height=600, margin=dict(l=0,r=0,t=40,b=0))
     st.plotly_chart(fig_map, use_container_width=True)
@@ -520,12 +477,8 @@ elif page == "🗺️ Interactive Map":
     )
     f.update_layout(plot_bgcolor='white',height=380,xaxis_tickangle=-30)
     st.plotly_chart(f,use_container_width=True)
-    findings_box(
-        "Los Angeles has the most diverse patient population, reflecting California's largest city. "
-        "Smaller rural counties tend to have less diversity but may still contain high proportions of "
-        "underserved racial groups. Counties where Black or Native patients make up a larger share "
-        "than expected for their population size are prime candidates for targeted health programmes."
-    )
+
+    section("💰 Insurance Coverage vs Income by County")
     cagg['scatter_insight'] = cagg.apply(lambda r:
         ("⚠️ High-risk county: low income AND low insurance — double burden on residents." if r['avg_income'] < 50000 and r['avg_insurance'] < 70
          else "⚠️ Low income but decent insurance — may be benefiting from public programmes." if r['avg_income'] < 50000
@@ -552,13 +505,6 @@ elif page == "🗺️ Interactive Map":
     )
     f2.update_layout(plot_bgcolor='white',height=420)
     st.plotly_chart(f2,use_container_width=True)
-    findings_box(
-        "Counties in the bottom-left of this chart (low income AND low insurance) are facing a "
-        "'double burden' — residents can't afford insurance AND can't afford to pay out of pocket. "
-        "These counties should be the highest priority for NGO resource allocation. "
-        "Counties in the top-right are relatively self-sufficient. The colour of each bubble shows "
-        "claim costs — darker red means higher costs, often coinciding with the most deprived areas."
-    )
 
 
 # ═════════════════════════  PAGE 3 — DEEP-DIVE  ════════════════════════════════
@@ -624,23 +570,8 @@ elif page == "🔍 Deep-Dive County Analysis":
         fig.update_yaxes(tickformat=met_tick,ticksuffix=x_sfx)
     fig.update_layout(plot_bgcolor='white',height=420)
     st.plotly_chart(fig,use_container_width=True)
-    # Dynamic finding based on selections
-    if chart_type == "Histogram (distribution)":
-        findings_box(
-            f"This chart shows how {metric_sel.lower()} is spread across individual patients in "
-            f"{sel} County, broken down by {grp_by.lower()}. "
-            f"A distribution shifted to the left means lower values (e.g. lower income or less insurance). "
-            f"If one group's bars sit consistently to the left of another group's bars, "
-            f"that is a direct sign of an equity gap within this county that deserves attention."
-        )
-    else:
-        findings_box(
-            f"This bar chart compares the average {metric_sel.lower()} across {grp_by.lower()} groups "
-            f"in {sel} County. Taller bars mean higher average values. "
-            f"A large gap between the tallest and shortest bar signals a within-county equity disparity — "
-            f"meaning people in the same county experience very different healthcare realities depending "
-            f"on their demographic background."
-        )
+
+    section("📅 Yearly Encounter Trends (Year of Encounter)")
     tc1,tc2 = st.columns(2)
     trend_grp = tc1.selectbox("Colour trend by:", ["Overall","Race","Gender"])
     trend_met = tc2.selectbox("Trend metric:", ["total_claim_cost","insurance_pct","income"],
@@ -654,15 +585,7 @@ elif page == "🔍 Deep-Dive County Analysis":
         fig2=px.line(yr,x='encounter_year',y=trend_met,markers=True,
                      title=f'{trend_met} Trend — {sel}',
                      labels={trend_met:'Avg Value','encounter_year':'Year of Encounter'})
-        fig2.update_traces(
-            line_color='#1a9e8f', marker_color='#1a9e8f',
-            hovertemplate=make_hover(
-                ["<b>Year of Encounter:</b> %{x}","<b>Avg Value:</b> %{y:,.1f}"],
-                ["This shows the overall county average for the selected metric in this year.",
-                 "A rising line means the situation is getting more expensive / better insured / higher income over time.",
-                 "A falling line may indicate worsening conditions or changes in the patient population."]
-            )
-        )
+        fig2.update_traces(line_color='#1a9e8f',marker_color='#1a9e8f')
     else:
         gc='race' if trend_grp=='Race' else 'gender'
         cm=RACE_COLORS if gc=='race' else GENDER_COLORS
@@ -671,25 +594,9 @@ elif page == "🔍 Deep-Dive County Analysis":
                      color_discrete_map=cm,markers=True,
                      title=f'{trend_met} by Year ({trend_grp}) — {sel}',
                      labels={trend_met:'Avg Value','encounter_year':'Year of Encounter'})
-        fig2.update_traces(
-            hovertemplate=make_hover(
-                ["<b>Group:</b> %{fullData.name}","<b>Year:</b> %{x}","<b>Avg Value:</b> %{y:,.1f}"],
-                ["Each line represents one " + trend_grp.lower() + " group.",
-                 "Lines moving apart over time means the gap between groups is growing — an equity concern.",
-                 "Lines converging means groups are becoming more equal — a positive trend.",
-                 "Sudden jumps may reflect changes in patient mix, not real health changes."]
-            )
-        )
     fig2.update_xaxes(tickmode='linear',dtick=1)
     fig2.update_layout(plot_bgcolor='white',height=360)
     st.plotly_chart(fig2,use_container_width=True)
-    findings_box(
-        f"This trend chart tracks how {trend_met.replace('_',' ')} has changed year by year in {sel} County "
-        f"(2015–2023). Each point represents the average for patients seen that year. "
-        f"If lines for different groups are moving further apart, the equity gap is widening and "
-        f"intervention is becoming more urgent. If the overall trend is rising for claim costs, "
-        f"healthcare is becoming less affordable for residents over time."
-    )
 
 
 # ═════════════════════════  PAGE 4 — INTERSECTIONAL  ═══════════════════════════
@@ -741,12 +648,6 @@ elif page == "⚖️ Intersectional Comparison":
         )
         f.update_layout(plot_bgcolor='white',height=400)
         st.plotly_chart(f,use_container_width=True)
-        findings_box(
-            f"Each box shows the spread of {out_plain} for one racial group. The line in the middle "
-            f"is the median (the 'typical' patient). If a box sits much higher or lower than others, "
-            f"that group faces a meaningfully different reality. Taller boxes with longer whiskers mean "
-            f"more inequality within the group itself — some patients doing much better or worse than others."
-        )
     with br:
         f=px.box(dff,x='gender',y=outcome,color='race',color_discrete_map=RACE_COLORS,
                  category_orders={'race':ALL_RACES},
@@ -764,13 +665,6 @@ elif page == "⚖️ Intersectional Comparison":
         )
         f.update_layout(plot_bgcolor='white',height=400)
         st.plotly_chart(f,use_container_width=True)
-        findings_box(
-            f"This chart breaks down {out_plain} by gender, with each race shown as a different colour "
-            f"(same colours as the left chart). Compare the same race across Male and Female to spot "
-            f"gender-based disparities within each group. In many health equity studies, women from "
-            f"marginalised groups face a compounded disadvantage — lower income, lower insurance, "
-            f"and higher unmet care needs."
-        )
 
     section(f"💳 {out_lbl} — Income Band × Race (shared colour legend)")
     grp=(dff.groupby(['income_band','race'])[outcome].mean().reset_index())
@@ -794,11 +688,6 @@ elif page == "⚖️ Intersectional Comparison":
         )
         f.update_layout(plot_bgcolor='white',height=420)
         st.plotly_chart(f,use_container_width=True)
-        findings_box(
-            f"Reading left to right: as income increases, does {out_plain} change consistently across "
-            f"all races? If one race's bar stays low even as income rises, it suggests barriers beyond "
-            f"just money — systemic inequities, geographic access issues, or cultural barriers to care."
-        )
     with ir:
         f=px.bar(grp,x='Race',y=out_lbl,color='Income Band',color_discrete_map=INCOME_COLORS,
                  barmode='group',title=f'{out_lbl} by Race × Income Band',
@@ -815,13 +704,6 @@ elif page == "⚖️ Intersectional Comparison":
         )
         f.update_layout(plot_bgcolor='white',height=420)
         st.plotly_chart(f,use_container_width=True)
-        findings_box(
-            f"This flips the perspective — each racial group is on the x-axis, with income bands as "
-            f"coloured bars. Look at whether the income gradient (dark red to dark blue) is consistent "
-            f"across races. If lower-income patients of one race have dramatically worse outcomes than "
-            f"lower-income patients of another race, income alone does not explain the gap — race itself "
-            f"is an independent factor, pointing to systemic discrimination or access barriers."
-        )
 
     section("🔍 Flag Counties with Equity Conditions")
     hc1,hc2 = st.columns(2)
@@ -865,13 +747,6 @@ elif page == "⚖️ Intersectional Comparison":
                     annotation_text='75% reference line')
     fig_c.update_layout(plot_bgcolor='white',height=400,xaxis_tickangle=-45,showlegend=False)
     st.plotly_chart(fig_c,use_container_width=True)
-    findings_box(
-        "Counties shown in red have been flagged as falling below your equity threshold. "
-        "The orange dashed line marks the 75% insurance coverage reference — counties below this "
-        "line have a significant share of residents who are uninsured or underinsured. "
-        "These are the areas where NGOs can have the greatest impact by advocating for expanded "
-        "Medicaid, community health clinics, or targeted subsidy programmes."
-    )
 
     section(f"🔥 Heatmap: Race × Income Band → {out_lbl}")
     pivot=dff.groupby(['race','income_band'])[outcome].mean().unstack()
@@ -891,13 +766,6 @@ elif page == "⚖️ Intersectional Comparison":
     )
     fh.update_layout(height=360)
     st.plotly_chart(fh,use_container_width=True)
-    findings_box(
-        "The darkest cells reveal the most severe equity situations — the specific combination of "
-        "race and income band where the outcome is worst. For claim costs, look for dark red cells; "
-        "for insurance and income, look for dark red as lowest values. If the darkest cells cluster "
-        "in the top rows (Native, Hawaiian, Black) AND left columns (low income bands), it confirms "
-        "that these groups face a compounded disadvantage from both race and poverty simultaneously."
-    )
 
 
 # ═════════════════════════  PAGE 5 — PREDICTIVE  ══════════════════════════════
@@ -1049,13 +917,6 @@ We compared **three candidate models** before selecting GBR:
         )
         f.update_layout(plot_bgcolor='white', height=340, showlegend=False)
         st.plotly_chart(f, use_container_width=True)
-        findings_box(
-            "Income and insurance coverage are the two strongest predictors of claim cost — "
-            "confirming that financial factors, not just medical ones, drive healthcare costs. "
-            "Race also contributes, meaning systemic inequities exist even after controlling for income. "
-            "Age and Age² together capture the U-shaped pattern: children and elderly patients cost more. "
-            "The income-to-insurance ratio captures patients who face both poverty AND lack of coverage simultaneously."
-        )
     with res_col:
         fig_res = go.Figure()
         fig_res.add_trace(go.Scatter(
@@ -1076,12 +937,6 @@ We compared **three candidate models** before selecting GBR:
                                yaxis_title='Residual ($)',
                                plot_bgcolor='white', height=340)
         st.plotly_chart(fig_res, use_container_width=True)
-        findings_box(
-            "A good model's errors should look like random noise — no pattern, no funnel shape, "
-            "no systematic over- or under-prediction. This scatter shows dots spread randomly "
-            "above and below the zero line, which confirms the model is not consistently "
-            "wrong for any particular group of patients. In plain terms: the model is fair and unbiased."
-        )
 
     st.markdown('<div class="insight-box">✅ <strong>Residual check:</strong> '
                 'Random scatter around zero — the model is not systematically over- or '
@@ -1218,14 +1073,8 @@ We compared **three candidate models** before selecting GBR:
         plot_bgcolor='white', height=500, legend_title=forecast_dim.replace('_',' ').title()
     )
     st.plotly_chart(fig_fc, use_container_width=True)
-    findings_box(
-        "Solid dots are real observed data (2015–2023). The dashed lines are projections based on "
-        "the historical trend for each group. The shaded areas show the uncertainty range — the further "
-        "into the future, the wider the band, honestly reflecting that we cannot predict perfectly. "
-        "Groups whose dashed lines are rising steeply will face increasing financial pressure by the "
-        "forecast year. If lower-income or minority groups show steeper rises, the equity gap is "
-        "expected to widen — strengthening the case for proactive NGO intervention now."
-    )
+
+    if forecast_table:
         section(f"📋 Forecast Summary Table — {forecast_yr}")
         fc_tbl = pd.DataFrame(forecast_table)
         st.dataframe(fc_tbl, use_container_width=True, hide_index=True)
